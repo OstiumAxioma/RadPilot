@@ -5,6 +5,7 @@ import vtkImageSlice from '@kitware/vtk.js/Rendering/Core/ImageSlice';
 import vtkImageMapper from '@kitware/vtk.js/Rendering/Core/ImageMapper';
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
 import vtkPiecewiseFunction from '@kitware/vtk.js/Common/DataModel/PiecewiseFunction';
+import vtkInteractorStyleImage from '@kitware/vtk.js/Interaction/Style/InteractorStyleImage';
 
 /**
  * Vtk2DSliceViewer - 基于 @kitware/vtk.js 的原生正交切片视口
@@ -149,12 +150,68 @@ export default function Vtk2DSliceViewer({
         ofun.addPoint(0, 1.0);
         ofun.addPoint(255, 1.0);
 
-        // 1.6 初始化交互器与 Resize
+        // 1.6 初始化 2D 专用交互器 (严格禁用 3D 旋转，仅允许 2D 平移与缩放)
         const interactor = grw.getInteractor();
         if (interactor) {
+            const iStyle = vtkInteractorStyleImage.newInstance();
+            iStyle.setInteractionMode('IMAGE2D');
+            interactor.setInteractorStyle(iStyle);
             interactor.initialize();
             interactor.bindEvents(container);
         }
+
+        // 1.7 原生高响应度平滑缩放与右键交互处理
+        const handleWheel = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 向上滚放大，向下滚缩小 (支持纯滚轮、Ctrl+滚轮、Shift+滚轮)
+            const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+            camera.zoom(zoomFactor);
+            renderWindow.render();
+        };
+
+        let isDragging = false;
+        let dragButton = 0;
+        let lastX = 0;
+        let lastY = 0;
+
+        const handleMouseDown = (e) => {
+            isDragging = true;
+            dragButton = e.button;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        };
+
+        const handleMouseMove = (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            lastX = e.clientX;
+            lastY = e.clientY;
+
+            // 右键拖拽平滑缩放 (向上拉放大，向下拉缩小)
+            if (dragButton === 2) {
+                const zoomFactor = 1.0 - dy * 0.008;
+                if (zoomFactor > 0.05 && zoomFactor < 5.0) {
+                    camera.zoom(zoomFactor);
+                    renderWindow.render();
+                }
+            }
+        };
+
+        const handleMouseUp = () => {
+            isDragging = false;
+        };
+
+        const handleContextMenu = (e) => {
+            e.preventDefault(); // 阻止浏览器弹出右键上下文菜单
+        };
+
+        container.addEventListener('wheel', handleWheel, { passive: false });
+        container.addEventListener('mousedown', handleMouseDown);
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+        container.addEventListener('contextmenu', handleContextMenu);
 
         const handleResize = () => {
             if (!container) return;
@@ -166,6 +223,11 @@ export default function Vtk2DSliceViewer({
 
         return () => {
             window.removeEventListener('resize', handleResize);
+            container.removeEventListener('wheel', handleWheel);
+            container.removeEventListener('mousedown', handleMouseDown);
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+            container.removeEventListener('contextmenu', handleContextMenu);
             if (interactor) {
                 interactor.unbindEvents();
             }

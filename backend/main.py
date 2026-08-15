@@ -1,10 +1,10 @@
 import os
 import sys
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Query
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 
 # 将当前 backend 添加到 python 搜索路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -20,13 +20,18 @@ harness = None
 NII_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "image", "MNI152NLin6_res-1x1x1_T1w.nii")
 API_KEY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "api", "gemini_testAPI.txt")
 
+current_image_path = NII_PATH
+current_image_name = "MNI152NLin6_res-1x1x1_T1w.nii"
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global skills_engine, llm_router, harness
-    print(f"[Init] 正在载入 MRI 医疗图像: {NII_PATH}")
+    global skills_engine, llm_router, harness, current_image_path, current_image_name
+    print(f"[Init] 正在载入默认 MRI 医疗图像: {NII_PATH}")
     skills_engine = ImageSkillsEngine(NII_PATH)
     llm_router = LLMRouter(API_KEY_PATH)
     harness = RadPilotHarness(skills_engine, llm_router)
+    current_image_path = NII_PATH
+    current_image_name = "MNI152NLin6_res-1x1x1_T1w.nii"
     print("[Init] RadPilot Agent Harness 后端服务初始化完成！")
     yield
 
@@ -53,11 +58,55 @@ def get_info():
     """获取图像维度与状态信息"""
     return {
         "status": "ready",
-        "image_path": NII_PATH,
+        "image_path": current_image_path,
+        "image_name": current_image_name,
         "slices_info": skills_engine.get_slice_count(),
         "current_version": f"v{harness.current_version_index}",
         "harness_state": harness.state
     }
+
+@app.post("/api/upload_image")
+async def upload_image(file: UploadFile = File(...)):
+    """支持用户上传新的 NIfTI / DICOM 影像文件并热重载整个 PACS 引擎 (彻底清除旧影像与历史分割)"""
+    global skills_engine, harness, current_image_path, current_image_name
+    try:
+        import time
+        filename = file.filename
+        upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        save_path = os.path.join(upload_dir, filename)
+
+        with open(save_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        print(f"[Upload] 成功接收新影像: {save_path}，正在彻底重置旧场景与引擎...")
+        
+        # 1. 彻底销毁旧技能引擎，加载全新单一影像
+        skills_engine = ImageSkillsEngine(save_path)
+        current_image_path = save_path
+        current_image_name = filename
+        
+        # 2. 彻底重置 Harness 状态机（清空所有旧版本树与轨迹，回归 v0 纯净态）
+        harness = RadPilotHarness(skills_engine, llm_router)
+        harness.version_tree = {}
+        harness.current_version_index = 0
+        harness.trajectory_events = []
+        harness.state = "PAUSED_FOR_DOCTOR"
+
+        slices_info = skills_engine.get_slice_count()
+        series_id = f"{filename}_{int(time.time() * 1000)}"
+
+        return {
+            "status": "success",
+            "series_id": series_id,
+            "image_name": filename,
+            "slices_info": slices_info,
+            "current_version": "v0",
+            "message": f"已彻底重置场景并载入唯一新序列: {filename}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"影像文件载入失败: {str(e)}")
 
 @app.get("/api/slice")
 def get_slice(index: int = Query(90, ge=0), axis: str = Query("axial")):

@@ -14,7 +14,9 @@ import {
     CheckCircle2, 
     AlertCircle,
     Cpu,
-    Flame
+    Flame,
+    UploadCloud,
+    FolderOpen
 } from 'lucide-react';
 import Vtk2DSliceViewer from './components/Vtk2DSliceViewer';
 import Vtk3DVolumeViewer from './components/Vtk3DVolumeViewer';
@@ -32,9 +34,9 @@ function buildVtkImageDataFromPayload(payload) {
     }
 
     const imageData = vtkImageData.newInstance();
-    imageData.setDimensions(payload.dimensions || [182, 218, 182]);
-    imageData.setSpacing(payload.spacing || [1.0, 1.0, 1.0]);
-    imageData.setOrigin(payload.origin || [0.0, 0.0, 0.0]);
+    imageData.setDimensions(payload.dimensions);
+    imageData.setSpacing(payload.spacing || [1, 1, 1]);
+    imageData.setOrigin(payload.origin || [0, 0, 0]);
 
     const scalars = vtkDataArray.newInstance({
         name: 'Scalars',
@@ -46,10 +48,16 @@ function buildVtkImageDataFromPayload(payload) {
 }
 
 export default function App() {
-    // 切片索引 (Axial 182, Coronal 218, Sagittal 182)
+    // 切片索引与最大边界 (自适应不同 NIfTI 尺寸)
     const [axialIndex, setAxialIndex] = useState(90);
     const [coronalIndex, setCoronalIndex] = useState(109);
     const [sagittalIndex, setSagittalIndex] = useState(91);
+    const [maxSlices, setMaxSlices] = useState({ axial: 181, coronal: 217, sagittal: 181 });
+
+    // 当前载入的序列名称与上传状态
+    const [seriesName, setSeriesName] = useState('MNI152NLin6_res-1x1x1_T1w.nii');
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef(null);
 
     // 窗宽 (Window Width) 与 窗位 (Window Level)
     const [windowWidth, setWindowWidth] = useState(7000);
@@ -76,17 +84,44 @@ export default function App() {
         {
             id: 'init-1',
             sender: 'agent',
-            text: 'RadPilot VTK.js 影像工作站已就绪。所有视口与体渲染均已基于 GPU WebGL 渲染管线驱动。请输入自然语言指令进行交互。',
+            text: 'RadPilot VTK.js 影像工作站已就绪。默认载入 MNI152 标准脑核磁序列，支持上传新 NIfTI / DICOM 影像。请输入自然语言指令进行交互。',
             meta: { action: 'READY', source: 'VTK_ENGINE' }
         }
     ]);
     const [isProcessing, setIsProcessing] = useState(false);
-
     const chatBottomRef = useRef(null);
 
-    // 1. 初始化拉取 MRI 主体数据 (VTK 格式)
-    useEffect(() => {
-        fetch('http://localhost:8000/api/volume_data_vtk')
+    // 序列唯一标识 (用于强制销毁并重建 VTK 视口管线，防止旧影像/旧纹理残留)
+    const [seriesId, setSeriesId] = useState('default_mni152');
+
+    // 封装拉取 MRI 主体数据与信息 (彻底重置场景，只保留单一最新影像)
+    const loadMriData = (newSeriesId = null) => {
+        // 1. 立即清空旧数据引用与旧分割，防止多影像或多图层并存
+        setMriImageData(null);
+        setMaskImageData(null);
+        setLabelLayers([]);
+        setCurrentVersion('v0');
+
+        const timestamp = Date.now();
+        fetch(`http://localhost:8000/api/info?t=${timestamp}`)
+            .then(res => res.json())
+            .then(info => {
+                if (info.image_name) setSeriesName(info.image_name);
+                if (info.slices_info) {
+                    const si = info.slices_info;
+                    setMaxSlices({
+                        axial: si.axial_slices - 1,
+                        coronal: si.coronal_slices - 1,
+                        sagittal: si.sagittal_slices - 1
+                    });
+                    setAxialIndex(Math.floor(si.axial_slices / 2));
+                    setCoronalIndex(Math.floor(si.coronal_slices / 2));
+                    setSagittalIndex(Math.floor(si.sagittal_slices / 2));
+                }
+            })
+            .catch(err => console.warn('获取图像 info 失败:', err));
+
+        fetch(`http://localhost:8000/api/volume_data_vtk?t=${timestamp}`)
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                 return res.json();
@@ -95,11 +130,17 @@ export default function App() {
                 console.log('成功获取 MRI VTK Payload, 大小:', data.dimensions);
                 const img = buildVtkImageDataFromPayload(data);
                 setMriImageData(img);
+                setSeriesId(newSeriesId || `series_${timestamp}`);
             })
             .catch(err => {
                 console.error('拉取 VTK MRI 数据失败:', err);
                 setLoadError(`拉取 MRI 数据失败: ${err.message}`);
             });
+    };
+
+    // 1. 初始化拉取默认 MRI 主体数据
+    useEffect(() => {
+        loadMriData('default_mni152');
     }, []);
 
     // 2. 监听当前 Mask 版本拉取 VTK Mask 数据
@@ -109,7 +150,7 @@ export default function App() {
             return;
         }
 
-        fetch(`http://localhost:8000/api/mask_volume_vtk?version=${currentVersion}`)
+        fetch(`http://localhost:8000/api/mask_volume_vtk?version=${currentVersion}&t=${Date.now()}`)
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                 return res.json();
@@ -123,6 +164,49 @@ export default function App() {
                 console.error('拉取 VTK Mask 数据失败:', err);
             });
     }, [currentVersion]);
+
+    // 处理新影像文件上传 (自动刷新 + 彻底清除旧影像与分割)
+    const handleFileChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch('http://localhost:8000/api/upload_image', {
+            method: 'POST',
+            body: formData
+        })
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                return res.json();
+            })
+            .then(data => {
+                setIsUploading(false);
+                const newSeriesName = data.image_name || file.name;
+                const newSeriesId = data.series_id || `series_${Date.now()}`;
+                setSeriesName(newSeriesName);
+                
+                // 彻底刷新载入新数据并重置视口
+                loadMriData(newSeriesId);
+
+                // 对话栏明确提示场景已重置
+                setChatMessages([
+                    {
+                        id: Date.now().toString(),
+                        sender: 'agent',
+                        text: `【场景已彻底重置】已清除旧影像与历史分割。当前场景仅保留单一最新影像: ${newSeriesName}。所有后续 AI 分析与分割指令将仅针对本序列执行。`,
+                        meta: { action: 'RESET_AND_LOAD', source: 'WORKSPACE_ENGINE' }
+                    }
+                ]);
+            })
+            .catch(err => {
+                console.error('上传失败:', err);
+                setIsUploading(false);
+                alert(`上传影像失败: ${err.message}`);
+            });
+    };
 
     // 滚动对话到底部
     useEffect(() => {
@@ -322,7 +406,7 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* 主体数据 */}
+                    {/* 主体数据序列与上传新影像入口 */}
                     <div className="panel-section">
                         <div className="section-label">
                             <Layers size={12} />
@@ -330,14 +414,34 @@ export default function App() {
                         </div>
                         <div className="pp-corner-box layer-card" style={{ marginBottom: 0 }}>
                             <div className="layer-header" style={{ marginBottom: 0 }}>
-                                <span className="layer-title">
-                                    <Cpu size={12} style={{ color: '#0284c7' }} />
-                                    <span>MNI152 T1w MRI</span>
+                                <span className="layer-title" title={seriesName} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 190 }}>
+                                    <Cpu size={12} style={{ color: '#0284c7', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 11 }}>{seriesName}</span>
                                 </span>
                                 <button className="pp-btn-icon" onClick={() => setShowVolume(!showVolume)} title="显隐切换">
                                     {showVolume ? <Eye size={13} style={{ color: '#0284c7' }} /> : <EyeOff size={13} style={{ color: '#94a3b8' }} />}
                                 </button>
                             </div>
+                        </div>
+
+                        {/* 上传新序列按钮与隐藏 Input */}
+                        <div style={{ marginTop: 6 }}>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".nii,.nii.gz,.dcm"
+                                style={{ display: 'none' }}
+                                onChange={handleFileChange}
+                            />
+                            <button
+                                className="pp-btn"
+                                style={{ width: '100%', fontSize: 10.5, padding: '5px 8px', gap: 6, color: '#0284c7' }}
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isUploading}
+                            >
+                                <UploadCloud size={13} />
+                                <span>{isUploading ? '正在解析重构新影像...' : '载入新影像 (NIfTI / DICOM)'}</span>
+                            </button>
                         </div>
                     </div>
 
@@ -397,6 +501,7 @@ export default function App() {
                         <div className="pane-canvas-wrapper">
                             <ErrorBoundary>
                                 <Vtk2DSliceViewer
+                                    key={`axial_${seriesId}`}
                                     axis="axial"
                                     sliceIndex={axialIndex}
                                     volumeData={mriImageData}
@@ -409,8 +514,8 @@ export default function App() {
                         </div>
                         <div className="pane-slider-bar">
                             <span style={{ fontSize: 9.5, color: '#16a34a', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>Z 轴位:</span>
-                            <input type="range" min="0" max="181" value={axialIndex} onChange={(e) => setAxialIndex(Number(e.target.value))} className="pane-slider pixel-slider" />
-                            <span className="pane-slice-text" style={{ color: '#16a34a' }}>{axialIndex} / 181</span>
+                            <input type="range" min="0" max={maxSlices.axial} value={axialIndex} onChange={(e) => setAxialIndex(Number(e.target.value))} className="pane-slider pixel-slider" />
+                            <span className="pane-slice-text" style={{ color: '#16a34a' }}>{axialIndex} / {maxSlices.axial}</span>
                         </div>
                     </div>
 
@@ -423,6 +528,7 @@ export default function App() {
                         <div className="pane-canvas-wrapper">
                             <ErrorBoundary>
                                 <Vtk2DSliceViewer
+                                    key={`coronal_${seriesId}`}
                                     axis="coronal"
                                     sliceIndex={coronalIndex}
                                     volumeData={mriImageData}
@@ -435,8 +541,8 @@ export default function App() {
                         </div>
                         <div className="pane-slider-bar">
                             <span style={{ fontSize: 9.5, color: '#d97706', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>Y 冠状:</span>
-                            <input type="range" min="0" max="217" value={coronalIndex} onChange={(e) => setCoronalIndex(Number(e.target.value))} className="pane-slider pixel-slider" />
-                            <span className="pane-slice-text" style={{ color: '#d97706' }}>{coronalIndex} / 217</span>
+                            <input type="range" min="0" max={maxSlices.coronal} value={coronalIndex} onChange={(e) => setCoronalIndex(Number(e.target.value))} className="pane-slider pixel-slider" />
+                            <span className="pane-slice-text" style={{ color: '#d97706' }}>{coronalIndex} / {maxSlices.coronal}</span>
                         </div>
                     </div>
 
@@ -449,6 +555,7 @@ export default function App() {
                         <div className="pane-canvas-wrapper">
                             <ErrorBoundary>
                                 <Vtk2DSliceViewer
+                                    key={`sagittal_${seriesId}`}
                                     axis="sagittal"
                                     sliceIndex={sagittalIndex}
                                     volumeData={mriImageData}
@@ -461,8 +568,8 @@ export default function App() {
                         </div>
                         <div className="pane-slider-bar">
                             <span style={{ fontSize: 9.5, color: '#e11d48', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>X 矢状:</span>
-                            <input type="range" min="0" max="181" value={sagittalIndex} onChange={(e) => setSagittalIndex(Number(e.target.value))} className="pane-slider pixel-slider" />
-                            <span className="pane-slice-text" style={{ color: '#e11d48' }}>{sagittalIndex} / 181</span>
+                            <input type="range" min="0" max={maxSlices.sagittal} value={sagittalIndex} onChange={(e) => setSagittalIndex(Number(e.target.value))} className="pane-slider pixel-slider" />
+                            <span className="pane-slice-text" style={{ color: '#e11d48' }}>{sagittalIndex} / {maxSlices.sagittal}</span>
                         </div>
                     </div>
 
@@ -475,6 +582,7 @@ export default function App() {
                         <div className="pane-canvas-wrapper" style={{ position: 'relative', width: '100%', height: '100%' }}>
                             <ErrorBoundary>
                                 <Vtk3DVolumeViewer
+                                    key={`3d_${seriesId}`}
                                     volumeData={mriImageData}
                                     maskData={maskImageData}
                                     windowWidth={windowWidth}

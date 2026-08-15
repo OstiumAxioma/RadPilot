@@ -8,6 +8,7 @@ import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransf
 import vtkPiecewiseFunction from '@kitware/vtk.js/Common/DataModel/PiecewiseFunction';
 import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
 import vtkAxesActor from '@kitware/vtk.js/Rendering/Core/AxesActor';
+import vtkInteractorStyleTrackballCamera from '@kitware/vtk.js/Interaction/Style/InteractorStyleTrackballCamera';
 
 /**
  * Vtk3DVolumeViewer - 基于 @kitware/vtk.js 的原生 3D GPU Ray-Marching 体渲染视口
@@ -32,7 +33,7 @@ export default function Vtk3DVolumeViewer({
     const maskCfunRef = useRef(null);
     const maskOfunRef = useRef(null);
     const orientationWidgetRef = useRef(null);
-    const [statusMsg, setStatusMsg] = useState('GPU Ray Marching Engine (Active)');
+    const [statusMsg, setStatusMsg] = useState('GPU Ray Marching + SSAO/LAO (Active)');
 
     // 1. 初始化 3D WebGL GenericRenderWindow 与独立子 Renderer 坐标轴系统 (仅在 volumeData 有效时)
     useEffect(() => {
@@ -50,24 +51,41 @@ export default function Vtk3DVolumeViewer({
         const renderWindow = grw.getRenderWindow();
         const interactor = grw.getInteractor();
 
-        // 1.1 主 3D MRI Volume 管道
+        // 1.1 主 3D MRI Volume 管道 (光追体积环境遮蔽 Volumetric SSAO + SSS 组织散射)
         const volume = vtkVolume.newInstance();
         const volumeMapper = vtkVolumeMapper.newInstance();
-        volumeMapper.setSampleDistance(1.0);
+        volumeMapper.setSampleDistance(0.4); // 高密度光线投射步长，消除阶梯噪点，模拟平滑体积散射
+        volumeMapper.setAutoAdjustSampleDistances(false);
+        volumeMapper.setMaximumSamplesPerRay(2000);
         volumeMapper.setInputData(volumeData);
         volume.setMapper(volumeMapper);
         volume.setVisibility(showVolume);
 
+        const vprop = volume.getProperty();
         const cfun = vtkColorTransferFunction.newInstance();
         const ofun = vtkPiecewiseFunction.newInstance();
-        volume.getProperty().setRGBTransferFunction(0, cfun);
-        volume.getProperty().setScalarOpacity(0, ofun);
-        volume.getProperty().setInterpolationTypeToLinear();
-        volume.getProperty().setShade(true);
-        volume.getProperty().setAmbient(0.35);
-        volume.getProperty().setDiffuse(0.65);
-        volume.getProperty().setSpecular(0.40);
-        volume.getProperty().setSpecularPower(25.0);
+        vprop.setRGBTransferFunction(0, cfun);
+        vprop.setScalarOpacity(0, ofun);
+        vprop.setInterpolationTypeToLinear();
+        vprop.setShade(true);
+        // SSS 模拟光照：高环境光(内透光肉感) + 柔漫射 + 宽泛生物湿润微光
+        vprop.setAmbient(0.44);
+        vprop.setDiffuse(0.68);
+        vprop.setSpecular(0.18);
+        vprop.setSpecularPower(10.0);
+
+        // 开启光线追踪体积环境光遮蔽 (Volumetric SSAO / Local Ambient Occlusion)
+        vprop.setLocalAmbientOcclusion(true);
+        vprop.setLAOKernelSize(11);
+        vprop.setLAOKernelRadius(5.0);
+        vprop.setVolumetricScatteringBlending(0.35);
+
+        // 启用梯度不透明度 (Gradient Opacity) 实现组织内透与沟回轮廓散射
+        vprop.setUseGradientOpacity(0, true);
+        vprop.setGradientOpacityMinimumValue(0, 1.2);
+        vprop.setGradientOpacityMinimumOpacity(0, 0.15);
+        vprop.setGradientOpacityMaximumValue(0, 14.0);
+        vprop.setGradientOpacityMaximumOpacity(0, 1.0);
 
         volumeRef.current = volume;
         volumeMapperRef.current = volumeMapper;
@@ -75,10 +93,12 @@ export default function Vtk3DVolumeViewer({
         ofunRef.current = ofun;
         renderer.addVolume(volume);
 
-        // 1.2 3D Mask 分割体渲染管道
+        // 1.2 3D Mask 分割体渲染管道 (开启环境遮蔽与平滑光照)
         const maskVolume = vtkVolume.newInstance();
         const maskVolumeMapper = vtkVolumeMapper.newInstance();
-        maskVolumeMapper.setSampleDistance(1.0);
+        maskVolumeMapper.setSampleDistance(0.5);
+        maskVolumeMapper.setAutoAdjustSampleDistances(false);
+        maskVolumeMapper.setMaximumSamplesPerRay(1500);
         if (maskData) {
             maskVolumeMapper.setInputData(maskData);
             maskVolume.setVisibility(Boolean(activeLayer && activeLayer.visible));
@@ -91,10 +111,15 @@ export default function Vtk3DVolumeViewer({
         const maskOfun = vtkPiecewiseFunction.newInstance();
         maskVolume.getProperty().setRGBTransferFunction(0, maskCfun);
         maskVolume.getProperty().setScalarOpacity(0, maskOfun);
-        maskVolume.getProperty().setInterpolationTypeToNearest();
+        maskVolume.getProperty().setInterpolationTypeToLinear();
         maskVolume.getProperty().setShade(true);
-        maskVolume.getProperty().setAmbient(0.4);
-        maskVolume.getProperty().setDiffuse(0.8);
+        maskVolume.getProperty().setAmbient(0.45);
+        maskVolume.getProperty().setDiffuse(0.75);
+        maskVolume.getProperty().setSpecular(0.20);
+        maskVolume.getProperty().setSpecularPower(12.0);
+        maskVolume.getProperty().setLocalAmbientOcclusion(true);
+        maskVolume.getProperty().setLAOKernelSize(9);
+        maskVolume.getProperty().setLAOKernelRadius(4.0);
 
         maskVolumeRef.current = maskVolume;
         maskVolumeMapperRef.current = maskVolumeMapper;
@@ -102,16 +127,39 @@ export default function Vtk3DVolumeViewer({
         maskOfunRef.current = maskOfun;
         renderer.addVolume(maskVolume);
 
-        // 1.3 核心防覆写架构：独立子 Renderer (OrientationMarkerWidget + AxesActor)
+        // 1.3 核心防覆写架构：独立子 Renderer (扁平纯色无光照 AxesActor + OrientationMarkerWidget)
         let orientationWidget = null;
         try {
-            const axes = vtkAxesActor.newInstance();
+            const axes = vtkAxesActor.newInstance({
+                config: {
+                    recenter: true,
+                    tipRadius: 0.11,
+                    tipLength: 0.22,
+                    shaftRadius: 0.035
+                },
+                xConfig: { color: [225, 29, 72] }, // Rose 600 (#e11d48) - 矢状位
+                yConfig: { color: [217, 119, 6] }, // Amber 600 (#d97706) - 冠状位
+                zConfig: { color: [22, 163, 74] }  // Green 600 (#16a34a) - 轴位
+            });
+            axes.setXAxisColor([225, 29, 72]);
+            axes.setYAxisColor([217, 119, 6]);
+            axes.setZAxisColor([22, 163, 74]);
+
+            // 关闭 3D PBR 与 Phong 光照，对齐扁平 Flat Design 设计风格
+            const prop = axes.getProperty();
+            if (prop) {
+                prop.setLighting(false);
+                prop.setAmbient(1.0);
+                prop.setDiffuse(0.0);
+                prop.setSpecular(0.0);
+            }
+
             orientationWidget = vtkOrientationMarkerWidget.newInstance();
             orientationWidget.setActor(axes);
             orientationWidget.setParentRenderer(renderer);
             orientationWidget.setInteractor(interactor);
             if (vtkOrientationMarkerWidget.Corners) {
-                orientationWidget.setViewportCorner(vtkOrientationMarkerWidget.Corners.BOTTOM_LEFT);
+                orientationWidget.setViewportCorner(vtkOrientationMarkerWidget.Corners.BOTTOM_RIGHT);
             }
             orientationWidget.setViewportSize(0.2);
             orientationWidgetRef.current = orientationWidget;
@@ -119,8 +167,10 @@ export default function Vtk3DVolumeViewer({
             console.warn('初始化 OrientationMarkerWidget 异常:', e);
         }
 
-        // 1.4 初始化 Interactor 与使能 Widget
+        // 1.4 初始化 3D 交互器样式 (支持左键旋转、右键缩放、中键平移 Pan、Shift+左键平移)
         if (interactor) {
+            const iStyle = vtkInteractorStyleTrackballCamera.newInstance();
+            interactor.setInteractorStyle(iStyle);
             interactor.initialize();
             interactor.bindEvents(container);
             if (orientationWidget) {
@@ -152,6 +202,23 @@ export default function Vtk3DVolumeViewer({
         renderer.resetCamera();
         camera.zoom(1.2);
 
+        // 原生平滑滚轮缩放
+        const handleWheel = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+            camera.zoom(zoomFactor);
+            renderWindow.render();
+        };
+
+        // 阻止浏览器对鼠标中键点击的默认滚轮行为，确保中键拖拽平移 100% 顺畅
+        const handleAuxClick = (e) => {
+            if (e.button === 1) e.preventDefault();
+        };
+
+        container.addEventListener('wheel', handleWheel, { passive: false });
+        container.addEventListener('auxclick', handleAuxClick);
+
         const handleResize = () => {
             if (!container) return;
             grw.resize();
@@ -162,6 +229,8 @@ export default function Vtk3DVolumeViewer({
 
         return () => {
             window.removeEventListener('resize', handleResize);
+            container.removeEventListener('wheel', handleWheel);
+            container.removeEventListener('auxclick', handleAuxClick);
             if (orientationWidget) {
                 try {
                     orientationWidget.setEnabled(false);
@@ -198,23 +267,26 @@ export default function Vtk3DVolumeViewer({
         const maxVal = Math.min(255, normWL + normWW / 2.0);
         const cutoff = Math.max(5, minVal + (maxVal - minVal) * volumeThreshold);
 
-        // 真实人体脑组织颜色传递函数 (Realistic Anatomical Color Transfer Function)
+        // SSS 级生物组织体积散射颜色传递函数 (Subsurface Scattering Spectrum)
         cfun.removeAllPoints();
         cfun.addRGBPoint(0, 1.0, 1.0, 1.0);
-        cfun.addRGBPoint(cutoff, 0.88, 0.65, 0.60); // 脑脊液/皮层边缘: 浅珊瑚肉粉
-        cfun.addRGBPoint(cutoff + (maxVal - cutoff) * 0.25, 0.82, 0.54, 0.50); // 大脑皮层灰质: 真实灰质肉粉色
-        cfun.addRGBPoint(cutoff + (maxVal - cutoff) * 0.60, 0.96, 0.90, 0.82); // 大脑白质: 象牙暖白髓质色
-        cfun.addRGBPoint(maxVal, 0.98, 0.94, 0.88); // 颅底与硬膜致密组织: 象牙硬骨色
+        cfun.addRGBPoint(cutoff, 0.90, 0.62, 0.58);                         // 浅表微血管/脑膜边缘: 透光珊瑚粉
+        cfun.addRGBPoint(cutoff + (maxVal - cutoff) * 0.20, 0.85, 0.52, 0.48); // 大脑皮层浅层灰质: 鲜活肉粉色
+        cfun.addRGBPoint(cutoff + (maxVal - cutoff) * 0.45, 0.80, 0.56, 0.52); // 大脑皮层深层灰质: 温润脑回实质色
+        cfun.addRGBPoint(cutoff + (maxVal - cutoff) * 0.70, 0.96, 0.90, 0.82); // 大脑白质/深部髓质: 象牙暖米白
+        cfun.addRGBPoint(maxVal, 0.98, 0.94, 0.88);                         // 致密硬脑膜与骨质: 象牙硬骨色
         cfun.addRGBPoint(255, 1.0, 0.96, 0.90);
 
+        // SSS 柔和吸收率曲线：浅表半透内透光，深部致密
         ofun.removeAllPoints();
         ofun.addPoint(0, 0.0);
         ofun.addPoint(cutoff, 0.0);
-        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.15, 0.15);
-        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.35, 0.45);
-        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.70, 0.80);
-        ofun.addPoint(maxVal, 0.92);
-        ofun.addPoint(255, 0.95);
+        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.12, 0.08); // 浅表半透产生内散射光晕
+        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.30, 0.32);
+        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.55, 0.65);
+        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.80, 0.88);
+        ofun.addPoint(maxVal, 0.94);
+        ofun.addPoint(255, 0.98);
 
         renderWindow.render();
     }, [windowWidth, windowLevel, volumeThreshold, showVolume, volumeData]);

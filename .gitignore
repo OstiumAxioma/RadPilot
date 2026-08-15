@@ -61,3 +61,9 @@ scratch/
 *~
 .DS_Store
 Thumbs.db
+
+# 用户上传临时影像数据目录 (忽略上传文件，保留目录结构)
+uploads/*
+!uploads/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep
