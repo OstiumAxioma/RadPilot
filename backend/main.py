@@ -103,6 +103,22 @@ def get_mask_volume_raw():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/volume_data_vtk")
+def get_volume_data_vtk():
+    """供 VTK.js 统一初始化的 3D ImageData 载荷端点"""
+    try:
+        return skills_engine.get_volume_vtk_payload()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/mask_volume_vtk")
+def get_mask_volume_vtk():
+    """供 VTK.js 统一初始化的 3D Mask ImageData 载荷端点"""
+    try:
+        return skills_engine.get_mask_vtk_payload()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/volume_atlas")
 def get_volume_atlas():
     """3D GPU Raymarching 体数据 2D Atlas 端点"""

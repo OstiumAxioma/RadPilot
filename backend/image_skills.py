@@ -163,6 +163,45 @@ class ImageSkillsEngine:
             "raw_base64": encoded
         }
 
+    def get_volume_vtk_payload(self) -> dict:
+        """
+        导出专供 @kitware/vtk.js vtkImageData 构造的标准体数据载荷
+        采用 Fortran-order (X 变化最快) 排布，与 vtkImageData.getPointData() 原生对齐
+        """
+        p99 = float(np.percentile(self.volume_data, 99))
+        norm_vol = np.clip(self.volume_data, 0, p99) / p99 * 255.0
+        vol_uint8 = norm_vol.astype(np.uint8)
+
+        # Fortran-order 展平，完全契合 VTK [x, y, z] 索引: idx = x + y*dim_x + z*dim_x*dim_y
+        flat_bytes = np.ascontiguousarray(vol_uint8.ravel(order='F')).tobytes()
+        encoded = base64.b64encode(flat_bytes).decode("utf-8")
+
+        return {
+            "dimensions": [int(self.shape[0]), int(self.shape[1]), int(self.shape[2])],
+            "spacing": [1.0, 1.0, 1.0],
+            "origin": [0.0, 0.0, 0.0],
+            "scalar_range": [0, 255],
+            "raw_base64": encoded
+        }
+
+    def get_mask_vtk_payload(self) -> dict:
+        """
+        导出专供 @kitware/vtk.js vtkImageData 构造的标准 3D Mask 体数据载荷
+        与 get_volume_vtk_payload 完全相同的几何空间与 Fortran-order 排布
+        """
+        mask_uint8 = self.current_mask_3d.astype(np.uint8)
+        flat_bytes = np.ascontiguousarray(mask_uint8.ravel(order='F')).tobytes()
+        encoded = base64.b64encode(flat_bytes).decode("utf-8")
+
+        return {
+            "dimensions": [int(self.shape[0]), int(self.shape[1]), int(self.shape[2])],
+            "spacing": [1.0, 1.0, 1.0],
+            "origin": [0.0, 0.0, 0.0],
+            "scalar_range": [0, 255],
+            "raw_base64": encoded,
+            "has_mask": bool(np.any(mask_uint8 > 0))
+        }
+
     # -------------------------------------------------------------
     # 医疗图像处理算子 (Image Tool Skills)
     # -------------------------------------------------------------

@@ -238,14 +238,16 @@ body {
 }
 
 .pane-badge {
-  padding: 1px 4px;
-  border-radius: 2px;
+  padding: 2px 6px;
+  border-radius: 3px;
   font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
 }
-.badge-axial { background: rgba(6, 182, 212, 0.2); color: #06b6d4; }
-.badge-coronal { background: rgba(16, 185, 129, 0.2); color: #10b981; }
-.badge-sagittal { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-.badge-3d { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+.badge-axial { background: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.4); } /* Z 轴: 绿色 (VTK 原生) */
+.badge-coronal { background: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.4); } /* Y 轴: 黄色 (VTK 原生) */
+.badge-sagittal { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); } /* X 轴: 红色 (VTK 原生) */
+.badge-3d { background: rgba(139, 92, 246, 0.2); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.4); }
 
 /* 2D Canvas Wrapper 防强行撑爆 */
 .pane-canvas-wrapper {
