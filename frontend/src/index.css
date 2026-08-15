@@ -1,0 +1,406 @@
+:root {
+  --bg-dark: #070a12;
+  --bg-card: #0e1424;
+  --bg-card-hover: #172036;
+  --border-color: #1e293b;
+  --primary-cyan: #06b6d4;
+  --primary-blue: #3b82f6;
+  --primary-emerald: #10b981;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100vh;
+  width: 100vw;
+  max-height: 100vh;
+  max-width: 100vw;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+
+/* App 整体容器 */
+.radpilot-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* 1. 顶部 Header (固定 42px) */
+.app-header {
+  height: 42px;
+  flex: 0 0 42px;
+  background-color: #0b101d;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-icon {
+  font-size: 20px;
+}
+
+.brand-title {
+  font-size: 15px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background-color: rgba(30, 41, 59, 0.8);
+  border: 1px solid var(--border-color);
+}
+
+.dot-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.dot-indicator.paused { background-color: #f59e0b; }
+.dot-indicator.processing { background-color: #3b82f6; animation: pulse 1.2s infinite; }
+.dot-indicator.completed { background-color: #10b981; }
+
+@keyframes pulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+/* 2. 主体三栏 (严格占满屏幕剩余高度 calc(100vh - 42px)) */
+.app-body-triplanar {
+  display: grid;
+  grid-template-columns: 260px 1fr 310px;
+  height: calc(100vh - 42px);
+  max-height: calc(100vh - 42px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 【左侧栏】：图层与 PACS 调控 */
+.layers-sidebar {
+  background-color: var(--bg-card);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar-title {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: #090e1a;
+  flex: 0 0 auto;
+}
+
+.panel-section {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.layer-card {
+  background-color: #141c2e;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.color-swatch-list {
+  display: flex;
+  gap: 5px;
+}
+
+.swatch-btn {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.swatch-btn.selected {
+  border-color: #ffffff;
+}
+
+/* 【中间 4 宫格】：正交三视图 + 3D (限制弹性防高) */
+.viewport-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2px;
+  background-color: #000000;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane-view {
+  background-color: #080c14;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #141c2e;
+}
+
+.pane-header {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.85);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.pane-badge {
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 9.5px;
+}
+.badge-axial { background: rgba(6, 182, 212, 0.2); color: #06b6d4; }
+.badge-coronal { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+.badge-sagittal { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+.badge-3d { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+
+/* 2D Canvas Wrapper 防强行撑爆 */
+.pane-canvas-wrapper {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.pane-canvas-wrapper canvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 96%;
+  max-height: 96%;
+  object-fit: contain;
+}
+
+/* mask canvas 与 MRI canvas 像素级完全叠加 */
+.pane-canvas-wrapper .mask-canvas {
+  pointer-events: none;
+}
+
+.pane-slider-bar {
+  height: 30px;
+  flex: 0 0 30px;
+  background-color: #0b101d;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.pane-slider {
+  flex: 1;
+  accent-color: var(--primary-cyan);
+  cursor: pointer;
+}
+
+.pane-slice-text {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  min-width: 44px;
+}
+
+/* 【右侧栏】：Gemini Vision Agent 对话 (绝对布局钉死底部输入框) */
+.agent-sidebar {
+  background-color: var(--bg-card);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-history {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 95%;
+}
+
+.chat-bubble.user { align-self: flex-end; }
+.chat-bubble.agent { align-self: flex-start; }
+
+.bubble-sender {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.bubble-content {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chat-bubble.user .bubble-content {
+  background-color: #2563eb;
+  color: #ffffff;
+}
+
+.chat-bubble.agent .bubble-content {
+  background-color: #1a2338;
+  border: 1px solid #2d3b59;
+  color: var(--text-main);
+}
+
+.agent-meta {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 4px;
+}
+
+.meta-tag {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+}
+
+/* 底部对话框容器（固定 48px 高度，绝对禁止缩放被压坏） */
+.chat-input-container {
+  height: 48px;
+  flex: 0 0 48px;
+  padding: 8px 10px;
+  background-color: #080d17;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-input {
+  flex: 1;
+  height: 32px;
+  background-color: #172036;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0 10px;
+  color: var(--text-main);
+  font-size: 12px;
+  outline: none;
+}
+
+.chat-input:focus {
+  border-color: var(--primary-cyan);
+}
+
+.send-btn {
+  height: 32px;
+  background-color: var(--primary-cyan);
+  color: #070a12;
+  border: none;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}

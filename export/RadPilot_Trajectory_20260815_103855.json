@@ -1,0 +1,57 @@
+{
+  "session_info": {
+    "system": "RadPilot Agent Harness",
+    "timestamp": "20260815_103855",
+    "nifti_source": "D:\\Project\\RadPilot\\image\\MNI152NLin6_res-1x1x1_T1w.nii",
+    "gold_standard_export": "D:\\Project\\RadPilot\\export\\RadPilot_GoldStandard_20260815_103855.nii.gz",
+    "total_steps": 3,
+    "total_versions": 2
+  },
+  "trajectory_events": [
+    {
+      "step": 1,
+      "timestamp": "2026-08-15T10:38:52.632563",
+      "agent_state": "PAUSED_FOR_DOCTOR",
+      "action": "INIT",
+      "user_prompt": "初始化空白画布与底图",
+      "detail": "提交 Mask 版本 v0",
+      "current_version": "v0"
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-08-15T10:38:52.936824",
+      "agent_state": "PROCESSING",
+      "action": "SKULL_STRIP",
+      "user_prompt": "帮我自动分割全脑去颅骨脑实质",
+      "detail": "提交 Mask 版本 v1",
+      "current_version": "v1"
+    },
+    {
+      "step": 3,
+      "timestamp": "2026-08-15T10:38:55.522058",
+      "agent_state": "PAUSED_FOR_DOCTOR",
+      "action": "UNDO",
+      "user_prompt": "撤销操作",
+      "detail": "回滚到版本 v0",
+      "current_version": "v0"
+    }
+  ],
+  "version_lineage": [
+    {
+      "version_id": "v0",
+      "tag": "v0_init",
+      "action": "INIT",
+      "prompt": "初始化空白画布与底图",
+      "timestamp": "2026-08-15 10:38:52",
+      "is_current": true
+    },
+    {
+      "version_id": "v1",
+      "tag": "v_skull_strip",
+      "action": "SKULL_STRIP",
+      "prompt": "帮我自动分割全脑去颅骨脑实质",
+      "timestamp": "2026-08-15 10:38:52",
+      "is_current": false
+    }
+  ]
+}

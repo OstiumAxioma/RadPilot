@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>RadPilot VTK.js 3D 坐标轴与体渲染独立验证</title>
+  <style>
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #030408; font-family: sans-serif; overflow: hidden; }
+    #container { width: 100vw; height: 100vh; position: relative; }
+    #info { position: absolute; top: 12px; left: 12px; color: #38bdf8; background: rgba(0,0,0,0.8); padding: 8px 14px; border-radius: 6px; font-size: 12px; border: 1px solid rgba(56,189,248,0.3); z-index: 10; }
+  </style>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+</head>
+<body>
+  <div id="info">🧠 RadPilot VTK.js 3D 坐标轴独立验证 | 鼠标拖拽旋转 3D 解剖大脑</div>
+  <div id="container"></div>
+
+  <script type="module">
+    import '@kitware/vtk.js/Rendering/Profiles/Volume';
+    import vtkGenericRenderWindow from '@kitware/vtk.js/Rendering/Misc/GenericRenderWindow';
+    import vtkVolume from '@kitware/vtk.js/Rendering/Core/Volume';
+    import vtkVolumeMapper from '@kitware/vtk.js/Rendering/Core/VolumeMapper';
+    import vtkImageData from '@kitware/vtk.js/Common/DataModel/ImageData';
+    import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray';
+    import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
+    import vtkPiecewiseFunction from '@kitware/vtk.js/Common/DataModel/PiecewiseFunction';
+    import vtkOutlineFilter from '@kitware/vtk.js/Filters/General/OutlineFilter';
+    import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
+    import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
+    import vtkPolyData from '@kitware/vtk.js/Common/DataModel/PolyData';
+    import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
+
+    const container = document.getElementById('container');
+    const genericRenderWindow = vtkGenericRenderWindow.newInstance({ background: [0.03, 0.04, 0.08] });
+    genericRenderWindow.setContainer(container);
+    genericRenderWindow.resize();
+
+    const renderer = genericRenderWindow.getRenderer();
+    const renderWindow = genericRenderWindow.getRenderWindow();
+
+    fetch('http://localhost:8000/api/volume_data_raw')
+      .then(r => r.json())
+      .then(data => {
+        const binaryString = window.atob(data.raw_base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+
+        const imageData = vtkImageData.newInstance();
+        imageData.setDimensions(data.dimensions || [96, 96, 96]);
+        imageData.setSpacing(data.spacing || [1, 1, 1]);
+
+        const scalarArray = vtkDataArray.newInstance({ name: 'Scalars', values: bytes, numberOfComponents: 1 });
+        imageData.getPointData().setScalars(scalarArray);
+
+        const mapper = vtkVolumeMapper.newInstance();
+        mapper.setInputData(imageData);
+
+        const volume = vtkVolume.newInstance();
+        volume.setMapper(mapper);
+
+        const ctfun = vtkColorTransferFunction.newInstance();
+        const ofun = vtkPiecewiseFunction.newInstance();
+
+        ofun.addPoint(0, 0.0);
+        ofun.addPoint(50, 0.0);
+        ofun.addPoint(60, 0.02);
+        ofun.addPoint(120, 0.2);
+        ofun.addPoint(255, 0.45);
+
+        ctfun.addRGBPoint(0, 0, 0, 0);
+        ctfun.addRGBPoint(60, 0.2, 0.55, 0.85);
+        ctfun.addRGBPoint(255, 1.0, 0.95, 0.9);
+
+        volume.getProperty().setRGBTransferFunction(0, ctfun);
+        volume.getProperty().setScalarOpacity(0, ofun);
+        volume.getProperty().setShade(true);
+
+        // 3D 坐标轴 PolyData
+        const axesPolyData = vtkPolyData.newInstance();
+        const points = new Float32Array([0,0,0, 1.5,0,0, 0,0,0, 0,1.5,0, 0,0,0, 0,0,1.5]);
+        const lines = new Uint32Array([2,0,1, 2,2,3, 2,4,5]);
+        const colors = new Uint8Array([255,0,0,255, 255,0,0,255, 0,255,0,255, 0,255,0,255, 0,120,255,255, 0,120,255,255]);
+        axesPolyData.getPoints().setData(points, 3);
+        axesPolyData.getLines().setData(lines);
+        axesPolyData.getPointData().setScalars(vtkDataArray.newInstance({ name: 'Colors', values: colors, numberOfComponents: 4 }));
+
+        const axesMapper = vtkMapper.newInstance();
+        axesMapper.setInputData(axesPolyData);
+
+        const axesActor = vtkActor.newInstance();
+        axesActor.setMapper(axesMapper);
+        axesActor.getProperty().setLineWidth(6.0);
+
+        const widget = vtkOrientationMarkerWidget.newInstance({ actor: axesActor, interactor: renderWindow.getInteractor() });
+        widget.setParentRenderer(renderer);
+        widget.setViewportCorner(vtkOrientationMarkerWidget.Corners.BOTTOM_LEFT);
+        widget.setViewportSize(0.25);
+        widget.setEnabled(true);
+
+        renderer.addVolume(volume);
+        renderer.resetCamera();
+        renderWindow.render();
+      });
+  </script>
+</body>
+</html>
