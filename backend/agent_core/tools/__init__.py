@@ -1,6 +1,15 @@
 from .base_tool import BaseMedicalTool, ImageContext, ToolResult
 from .registry import ToolRegistry, GLOBAL_TOOL_REGISTRY
 from .guided_refinement_tools import SpatialPromptGuidedSegmentationTool
+from .interactive_tools import (
+    ThresholdRangeTool,
+    PaintBrush3DTool,
+    EraseBrush3DTool,
+    ScissorsCutTool,
+    RegionGrowthTool,
+    FillBetweenSlicesTool,
+    IslandAndSmoothTool
+)
 from .morphology_tools import (
     MorphologicalDilationTool,
     MorphologicalErosionTool,
@@ -20,6 +29,13 @@ __all__ = [
     "ToolRegistry",
     "GLOBAL_TOOL_REGISTRY",
     "SpatialPromptGuidedSegmentationTool",
+    "ThresholdRangeTool",
+    "PaintBrush3DTool",
+    "EraseBrush3DTool",
+    "ScissorsCutTool",
+    "RegionGrowthTool",
+    "FillBetweenSlicesTool",
+    "IslandAndSmoothTool",
     "MorphologicalDilationTool",
     "MorphologicalErosionTool",
     "ConnectedComponentFilterTool",

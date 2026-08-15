@@ -22,6 +22,7 @@ import Vtk2DSliceViewer from './components/Vtk2DSliceViewer';
 import Vtk3DVolumeViewer from './components/Vtk3DVolumeViewer';
 import ErrorBoundary from './components/ErrorBoundary';
 import MarkdownRenderer from './components/MarkdownRenderer';
+import CoTTimeline from './components/CoTTimeline';
 
 /**
  * 将后端返回的标准 VTK Payload 转换为前端原生的 vtkImageData 实体
@@ -268,8 +269,9 @@ export default function App() {
                         text: replyText,
                         meta: {
                             action: data.action_type || data.action || 'INSPECT',
-                            source: data.source || 'GEMINI_ROUTER',
-                            elapsed: data.elapsed_ms || 0
+                            source: data.source || 'REACT_AGENTIC_LOOP',
+                            elapsed: data.elapsed_ms || 0,
+                            thought_steps: data.thought_steps || []
                         }
                     }
                 ]);
@@ -611,11 +613,19 @@ export default function App() {
                                 </span>
                                 <div className="bubble-content">
                                     <MarkdownRenderer content={msg.text} />
+                                    {msg.meta && msg.meta.thought_steps && msg.meta.thought_steps.length > 0 && (
+                                        <CoTTimeline steps={msg.meta.thought_steps} totalElapsed={msg.meta.elapsed} />
+                                    )}
                                 </div>
                                 {msg.meta && (
                                     <div className="agent-meta">
                                         {msg.meta.action && <span className="meta-tag">ACTION: {msg.meta.action}</span>}
                                         {msg.meta.source && <span className="meta-tag">SOURCE: {msg.meta.source}</span>}
+                                        {msg.meta.thought_steps && msg.meta.thought_steps.length > 0 && (
+                                            <span className="meta-tag" style={{ color: '#0369a1', borderColor: '#bae6fd' }}>
+                                                {msg.meta.thought_steps.length} STEPS
+                                            </span>
+                                        )}
                                         {msg.meta.elapsed !== undefined && <span className="meta-tag">{msg.meta.elapsed}ms</span>}
                                     </div>
                                 )}

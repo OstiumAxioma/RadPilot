@@ -1,17 +1,26 @@
 from typing import Dict, List, Any, Optional
 from .base_tool import BaseMedicalTool, ImageContext, ToolResult
+from .interactive_tools import (
+    ThresholdRangeTool,
+    PaintBrush3DTool,
+    EraseBrush3DTool,
+    ScissorsCutTool,
+    RegionGrowthTool,
+    FillBetweenSlicesTool,
+    IslandAndSmoothTool
+)
+from .guided_refinement_tools import SpatialPromptGuidedSegmentationTool
+from .segmentation_tools import (
+    BrainTissueExtractionTool,
+    IntensityThresholdSegmentationTool,
+    ResetMaskTool
+)
 from .morphology_tools import (
     MorphologicalDilationTool,
     MorphologicalErosionTool,
     ConnectedComponentFilterTool,
     MorphologicalSmoothTool
 )
-from .segmentation_tools import (
-    BrainTissueExtractionTool,
-    IntensityThresholdSegmentationTool,
-    ResetMaskTool
-)
-from .guided_refinement_tools import SpatialPromptGuidedSegmentationTool
 
 class ToolRegistry:
     """
@@ -25,7 +34,17 @@ class ToolRegistry:
     def _register_default_tools(self):
         """注册所有内置核心医学图像工具"""
         default_tools = [
+            # 1. 原生多模态空间引导与区域生长
             SpatialPromptGuidedSegmentationTool(),
+            # 2. 放射科精细手动/半自动原子工具箱
+            ThresholdRangeTool(),
+            RegionGrowthTool(),
+            PaintBrush3DTool(),
+            EraseBrush3DTool(),
+            ScissorsCutTool(),
+            FillBetweenSlicesTool(),
+            IslandAndSmoothTool(),
+            # 3. 基础解剖与形态学工具
             BrainTissueExtractionTool(),
             MorphologicalDilationTool(),
             MorphologicalErosionTool(),

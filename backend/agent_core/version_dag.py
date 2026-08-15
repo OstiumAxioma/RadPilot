@@ -56,6 +56,7 @@ class VersionDAG:
         self.nodes: Dict[str, VersionNode] = {}
         self.current_node_id: str = "v0"
         self.current_branch: str = "main"
+        self.branches: Dict[str, str] = {"main": "v0"}
         self._node_counter = 0
 
         # 初始化 v0 根节点 (空白掩码)
@@ -115,8 +116,15 @@ class VersionDAG:
         self.current_node_id = new_id
         return node
 
+    def create_branch(self, branch_name: str):
+        """显式创建并切换到指定名称的新分支"""
+        self.current_branch = branch_name
+        self.branches[branch_name] = self.current_node_id
+
     def checkout(self, node_id: str) -> Optional[VersionNode]:
-        """切换工作区到指定历史版本节点"""
+        """
+        检出并切换工作区到指定历史节点 (可从任意历史节点继续演进，不破坏原有分支)
+        """
         if node_id in self.nodes:
             self.current_node_id = node_id
             self.current_branch = self.nodes[node_id].branch_name
@@ -176,6 +184,7 @@ class VersionDAG:
             "voxel_count_b": count_b,
             "intersection_voxels": intersection,
             "dice_similarity": dice,
+            "dice_score": dice,
             "iou": iou,
             "voxel_difference": diff_voxels,
             "volume_difference_mm3": diff_volume_mm3

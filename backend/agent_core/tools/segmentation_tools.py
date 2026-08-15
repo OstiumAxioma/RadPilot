@@ -46,13 +46,13 @@ class BrainTissueExtractionTool(BaseMedicalTool):
 
     def execute(self, context: ImageContext, **kwargs) -> ToolResult:
         old_mask = context.current_mask
-        img = context.image_data
+        img = context.image_data.astype(np.float32)
         region = kwargs.get("region", "all")
-        ratio = kwargs.get("threshold_ratio", 0.22)
+        ratio = kwargs.get("threshold_ratio", 0.28)
         dim_x, dim_y, dim_z = context.shape
 
-        # 1. 估算组织强度分布 (自适应高斯平滑降噪)
-        smoothed = ndimage.gaussian_filter(img.astype(np.float32), sigma=1.2)
+        # 1. 自适应高斯平滑降噪
+        smoothed = ndimage.gaussian_filter(img, sigma=1.0)
         non_zero = smoothed[smoothed > 10]
         if len(non_zero) == 0:
             threshold = float(np.mean(img))
@@ -60,34 +60,49 @@ class BrainTissueExtractionTool(BaseMedicalTool):
             p98 = np.percentile(non_zero, 98)
             threshold = p98 * ratio
 
-        # 2. 粗提取颅内组织
+        # 2. 粗二值化 (包含头皮和脑组织)
         binary = (smoothed > threshold).astype(np.uint8)
 
-        # 3. 三维连通域提取最大颅内主体
-        labeled, num_features = ndimage.label(binary)
-        if num_features > 0:
-            sizes = ndimage.sum(binary, labeled, range(1, num_features + 1))
-            largest_label = np.argmax(sizes) + 1
-            brain_mask = (labeled == largest_label).astype(np.uint8)
-        else:
-            brain_mask = binary
+        # 3. 核心 BET 算法: 深度 3D 腐蚀 (8体素/8mm) 彻底切断头皮-颅骨-脑实质桥连
+        eroded = ndimage.binary_erosion(binary, iterations=8).astype(np.uint8)
 
-        # 4. 孔洞填充与轻微闭运算平滑边缘
+        # 4. 在腐蚀内部提取核心脑实质连通域 (此时外层头皮已被完全切除)
+        labeled, num_features = ndimage.label(eroded)
+        if num_features > 0:
+            sizes = ndimage.sum(eroded, labeled, range(1, num_features + 1))
+            largest_label = np.argmax(sizes) + 1
+            brain_core = (labeled == largest_label).astype(np.uint8)
+        else:
+            brain_core = eroded
+
+        # 5. 从脑核心向外条件受限膨胀，严格以颅骨低信号 (smoothed < threshold*0.75) 为阻断墙
+        stop_wall = smoothed < (threshold * 0.75)
+        brain_mask = brain_core
+        for _ in range(8):
+            dilated = ndimage.binary_dilation(brain_mask).astype(np.uint8)
+            # 条件受限: 绝不允许跨越颅骨暗环 (stop_wall)
+            brain_mask = np.logical_and(dilated, np.logical_and(binary, np.logical_not(stop_wall))).astype(np.uint8)
+
+        # 6. 孔洞充填与微闭运算平滑
         brain_mask = ndimage.binary_fill_holes(brain_mask).astype(np.uint8)
         struct = ndimage.generate_binary_structure(3, 1)
         brain_mask = ndimage.binary_closing(brain_mask, structure=struct, iterations=1).astype(np.uint8)
 
-        # 5. 解剖亚结构空间与概率先验切分 (MNI-Space Anatomical Priors)
-        if region in ["left_hemisphere", "right_hemisphere"]:
-            mid_x = dim_x // 2
+        # 7. 解剖亚结构切分 (MNI-Space Anatomical Priors)
+        mid_x = dim_x // 2
+        if region == "left_hemisphere":
+            # 放射科标准解剖坐标系: 人体解剖左侧在数据矩阵中为 X >= mid_x
             hemisphere_mask = np.zeros_like(brain_mask)
-            if region == "left_hemisphere":
-                hemisphere_mask[:mid_x, :, :] = 1
-                desc = "左大脑半球实质提取"
-            else:
-                hemisphere_mask[mid_x:, :, :] = 1
-                desc = "右大脑半球实质提取"
+            hemisphere_mask[mid_x:, :, :] = 1
             new_mask = np.logical_and(brain_mask, hemisphere_mask).astype(np.uint8)
+            desc = "左大脑半球实质精准提取 (已剔除头皮与颅骨)"
+
+        elif region == "right_hemisphere":
+            # 放射科标准解剖坐标系: 人体解剖右侧在数据矩阵中为 X < mid_x
+            hemisphere_mask = np.zeros_like(brain_mask)
+            hemisphere_mask[:mid_x, :, :] = 1
+            new_mask = np.logical_and(brain_mask, hemisphere_mask).astype(np.uint8)
+            desc = "右大脑半球实质精准提取 (已剔除头皮与颅骨)"
 
         elif region == "cerebellum":
             # 小脑位于颅后窝 (Posterior Fossa)，在解剖空间中处于下部 (Z < 0.45 * dim_z) 且偏后侧 (Y < 0.55 * dim_y)
