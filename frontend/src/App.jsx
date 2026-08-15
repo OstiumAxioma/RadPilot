@@ -248,61 +248,176 @@ export default function App() {
         setIsProcessing(true);
         setHarnessState('PROCESSING');
 
-        fetch('http://localhost:8000/api/chat', {
+        const agentMsgId = (Date.now() + 1).toString();
+        let runningSteps = [];
+        let activeStatusText = '正在审视三维正交画廊并进行解剖定位...';
+
+        // 立即在前端插入一个处于流式响应状态的 Agent 消息卡片
+        setChatMessages(prev => [
+            ...prev,
+            {
+                id: agentMsgId,
+                sender: 'agent',
+                text: '',
+                isStreaming: true,
+                meta: {
+                    statusText: activeStatusText,
+                    thought_steps: []
+                }
+            }
+        ]);
+
+        fetch('http://localhost:8000/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: userMsg.text, message: userMsg.text, current_version: currentVersion })
         })
-            .then(res => {
-                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-                return res.json();
-            })
-            .then(data => {
-                setIsProcessing(false);
-                const replyText = data.reply || data.message || '指令执行完毕。';
+            .then(async response => {
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 
-                setChatMessages(prev => [
-                    ...prev,
-                    {
-                        id: (Date.now() + 1).toString(),
-                        sender: 'agent',
-                        text: replyText,
-                        meta: {
-                            action: data.action_type || data.action || 'INSPECT',
-                            source: data.source || 'REACT_AGENTIC_LOOP',
-                            elapsed: data.elapsed_ms || 0,
-                            thought_steps: data.thought_steps || []
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // 保留未完整的行
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed.startsWith('data:')) continue;
+                        
+                        const jsonStr = trimmed.replace(/^data:\s*/, '');
+                        if (!jsonStr) continue;
+
+                        try {
+                            const event = JSON.parse(jsonStr);
+
+                            if (event.type === 'step_start') {
+                                activeStatusText = event.message || `第 ${event.step_index} 轮解剖推理与决策中...`;
+                            } else if (event.type === 'thought') {
+                                // 实时更新当前 step 的思考
+                                const stepIdx = event.step_index;
+                                const existing = runningSteps.find(s => s.step_index === stepIdx);
+                                if (existing) {
+                                    existing.thought = event.thought;
+                                } else {
+                                    runningSteps.push({
+                                        step_index: stepIdx,
+                                        iteration: stepIdx,
+                                        thought: event.thought
+                                    });
+                                }
+                            } else if (event.type === 'action_start') {
+                                const stepIdx = event.step_index;
+                                const existing = runningSteps.find(s => s.step_index === stepIdx);
+                                if (existing) {
+                                    existing.action_name = event.action_name;
+                                    existing.action_params = event.action_params;
+                                } else {
+                                    runningSteps.push({
+                                        step_index: stepIdx,
+                                        iteration: stepIdx,
+                                        action_name: event.action_name,
+                                        action_params: event.action_params
+                                    });
+                                }
+                            } else if (event.type === 'action_done') {
+                                const stepData = event.step_data;
+                                const existingIdx = runningSteps.findIndex(s => s.step_index === stepData.step_index);
+                                if (existingIdx >= 0) {
+                                    runningSteps[existingIdx] = stepData;
+                                } else {
+                                    runningSteps.push(stepData);
+                                }
+                                // 实时同步前端视口的 Mask 版本！
+                                if (event.current_version && event.current_version !== 'v0') {
+                                    setCurrentVersion(event.current_version);
+                                }
+                            } else if (event.type === 'verification_gate') {
+                                const stepIdx = event.step_index;
+                                const existing = runningSteps.find(s => s.step_index === stepIdx);
+                                if (existing) {
+                                    existing.warnings = event.warnings || [];
+                                    existing.island_count = event.island_count;
+                                }
+                            } else if (event.type === 'complete') {
+                                setIsProcessing(false);
+                                const replyText = event.reply || '指令执行完毕。';
+                                const versionId = event.new_version || event.current_version;
+
+                                setChatMessages(prev => prev.map(m => {
+                                    if (m.id === agentMsgId) {
+                                        return {
+                                            ...m,
+                                            text: replyText,
+                                            isStreaming: false,
+                                            meta: {
+                                                action: event.action || 'INSPECT',
+                                                source: event.source || 'REACT_VERIFICATION_LOOP',
+                                                elapsed: event.elapsed_ms || 0,
+                                                thought_steps: event.thought_steps || runningSteps
+                                            }
+                                        };
+                                    }
+                                    return m;
+                                }));
+
+                                if (versionId && versionId !== 'v0') {
+                                    setCurrentVersion(versionId);
+                                    const colorPalette = ['#06b6d4', '#3b82f6', '#e11d48', '#16a34a', '#d97706', '#9333ea'];
+                                    const defaultColor = colorPalette[labelLayers.length % colorPalette.length];
+                                    const layerName = event.layer_name || `分割图层 (${versionId})`;
+
+                                    setLabelLayers(prev => [
+                                        { id: versionId, name: layerName, visible: true, color: defaultColor, opacity: 0.6 },
+                                        ...prev.filter(l => l.id !== versionId)
+                                    ]);
+                                }
+                                setHarnessState('PAUSED_FOR_DOCTOR');
+                            }
+
+                            // 实时同步渲染当前气泡
+                            if (event.type !== 'complete') {
+                                setChatMessages(prev => prev.map(m => {
+                                    if (m.id === agentMsgId) {
+                                        return {
+                                            ...m,
+                                            isStreaming: true,
+                                            meta: {
+                                                statusText: activeStatusText,
+                                                thought_steps: [...runningSteps]
+                                            }
+                                        };
+                                    }
+                                    return m;
+                                }));
+                            }
+
+                        } catch (err) {
+                            console.error('SSE JSON 解析错误:', err, trimmed);
                         }
                     }
-                ]);
-
-                const versionId = data.new_version || data.current_version;
-                if (versionId && versionId !== 'v0') {
-                    setCurrentVersion(versionId);
-
-                    const colorPalette = ['#06b6d4', '#3b82f6', '#e11d48', '#16a34a', '#d97706', '#9333ea'];
-                    const defaultColor = colorPalette[labelLayers.length % colorPalette.length];
-                    const layerName = data.layer_name || `分割图层 (${versionId})`;
-
-                    setLabelLayers(prev => [
-                        { id: versionId, name: layerName, visible: true, color: defaultColor, opacity: 0.6 },
-                        ...prev.filter(l => l.id !== versionId)
-                    ]);
                 }
-                setHarnessState(data.state || 'PAUSED_FOR_DOCTOR');
             })
             .catch(err => {
-                console.error('交互错误:', err);
+                console.error('流式交互错误:', err);
                 setIsProcessing(false);
-                setChatMessages(prev => [
-                    ...prev,
-                    {
-                        id: (Date.now() + 1).toString(),
-                        sender: 'agent',
-                        text: `通信异常: 无法连接至后端服务 (${err.message})`,
-                        meta: { action: 'ERROR', source: 'NETWORK' }
+                setChatMessages(prev => prev.map(m => {
+                    if (m.id === agentMsgId) {
+                        return {
+                            ...m,
+                            text: `通信异常: 无法连接至后端流式服务 (${err.message})`,
+                            isStreaming: false,
+                            meta: { action: 'ERROR', source: 'NETWORK', thought_steps: runningSteps }
+                        };
                     }
-                ]);
+                    return m;
+                }));
                 setHarnessState('PAUSED_FOR_DOCTOR');
             });
     };
@@ -612,9 +727,14 @@ export default function App() {
                                     {msg.sender === 'user' ? '医生' : 'RadPilot Agent'}
                                 </span>
                                 <div className="bubble-content">
-                                    <MarkdownRenderer content={msg.text} />
-                                    {msg.meta && msg.meta.thought_steps && msg.meta.thought_steps.length > 0 && (
-                                        <CoTTimeline steps={msg.meta.thought_steps} totalElapsed={msg.meta.elapsed} />
+                                    {msg.text && <MarkdownRenderer content={msg.text} />}
+                                    {msg.meta && (msg.meta.thought_steps?.length > 0 || msg.isStreaming) && (
+                                        <CoTTimeline
+                                            steps={msg.meta.thought_steps || []}
+                                            totalElapsed={msg.meta.elapsed}
+                                            isStreaming={msg.isStreaming}
+                                            activeStatus={msg.meta.statusText}
+                                        />
                                     )}
                                 </div>
                                 {msg.meta && (
@@ -631,15 +751,6 @@ export default function App() {
                                 )}
                             </div>
                         ))}
-                        {isProcessing && (
-                            <div className="chat-bubble agent" style={{ borderLeftColor: '#0284c7', background: '#f8fafc' }}>
-                                <span className="bubble-sender">RadPilot Agent</span>
-                                <div className="bubble-content" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#0284c7', fontWeight: 600 }}>
-                                    <Sparkles size={12} />
-                                    <span>Gemini 意图解析与医学算子调度中...</span>
-                                </div>
-                            </div>
-                        )}
                         <div ref={chatBottomRef} />
                     </div>
 

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Brain, Zap, Activity, Clock, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Brain, Zap, Activity, Clock, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 /**
- * 医疗级 ReAct 思维链与 CoT 步骤流可视化组件
+ * 医疗级 ReAct 思维链与 CoT 步骤流实时可视化组件
+ * 支持流式动态渲染、质检验收告警与实时执行状态展示
  */
-export default function CoTTimeline({ steps = [], totalElapsed = 0 }) {
+export default function CoTTimeline({ steps = [], totalElapsed = 0, isStreaming = false, activeStatus = '' }) {
     const [isExpanded, setIsExpanded] = useState(true);
 
-    if (!steps || steps.length === 0) return null;
+    if ((!steps || steps.length === 0) && !isStreaming) return null;
 
     return (
         <div style={{
@@ -33,17 +34,21 @@ export default function CoTTimeline({ steps = [], totalElapsed = 0 }) {
                 }}
             >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: '#0f172a' }}>
-                    <Brain size={13} style={{ color: '#0284c7' }} />
+                    {isStreaming ? (
+                        <Loader2 size={13} className="animate-spin" style={{ color: '#0284c7' }} />
+                    ) : (
+                        <Brain size={13} style={{ color: '#0284c7' }} />
+                    )}
                     <span>ReAct 多步自主精修思维链</span>
                     <span style={{
-                        background: '#e0f2fe',
-                        color: '#0369a1',
+                        background: isStreaming ? '#fef3c7' : '#e0f2fe',
+                        color: isStreaming ? '#b45309' : '#0369a1',
                         padding: '1px 6px',
                         borderRadius: 10,
                         fontSize: 10,
                         fontWeight: 600
                     }}>
-                        {steps.length} 步迭代
+                        {isStreaming ? `第 ${steps.length + 1} 步执行中...` : `${steps.length} 步闭环迭代`}
                     </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: '#64748b' }}>
@@ -85,7 +90,7 @@ export default function CoTTimeline({ steps = [], totalElapsed = 0 }) {
                                 }}>
                                     {step.step_index || idx + 1}
                                 </div>
-                                {idx < steps.length - 1 && (
+                                {(idx < steps.length - 1 || isStreaming) && (
                                     <div style={{ width: 2, flex: 1, background: '#e2e8f0', margin: '3px 0' }} />
                                 )}
                             </div>
@@ -112,27 +117,29 @@ export default function CoTTimeline({ steps = [], totalElapsed = 0 }) {
                                 )}
 
                                 {/* 2. Action 执行动作 */}
-                                <div style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    flexWrap: 'wrap',
-                                    gap: 4,
-                                    margin: '4px 0',
-                                    padding: '3px 6px',
-                                    background: '#ffffff',
-                                    borderRadius: 4,
-                                    border: '1px solid #e2e8f0'
-                                }}>
-                                    <Zap size={11} style={{ color: '#d97706' }} />
-                                    <span style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-mono)' }}>
-                                        {step.action_name}
-                                    </span>
-                                    {step.action_params && Object.keys(step.action_params).length > 0 && (
-                                        <span style={{ color: '#64748b', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                                            ({JSON.stringify(step.action_params)})
+                                {step.action_name && (
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        flexWrap: 'wrap',
+                                        gap: 4,
+                                        margin: '4px 0',
+                                        padding: '3px 6px',
+                                        background: '#ffffff',
+                                        borderRadius: 4,
+                                        border: '1px solid #e2e8f0'
+                                    }}>
+                                        <Zap size={11} style={{ color: '#d97706' }} />
+                                        <span style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-mono)' }}>
+                                            {step.action_name}
                                         </span>
-                                    )}
-                                </div>
+                                        {step.action_params && Object.keys(step.action_params).length > 0 && (
+                                            <span style={{ color: '#64748b', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+                                                ({JSON.stringify(step.action_params)})
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* 3. Observation 物理观察 */}
                                 {step.observation && (
@@ -152,9 +159,71 @@ export default function CoTTimeline({ steps = [], totalElapsed = 0 }) {
                                         <span>{step.observation}</span>
                                     </div>
                                 )}
+
+                                {/* 4. 质检验收告警 (Verification Gate) */}
+                                {step.warnings && step.warnings.length > 0 && (
+                                    <div style={{
+                                        marginTop: 4,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 2,
+                                        color: '#b45309',
+                                        background: '#fffbeb',
+                                        border: '1px solid #fef3c7',
+                                        padding: '4px 6px',
+                                        borderRadius: 4,
+                                        fontSize: 10.5,
+                                        lineHeight: 1.4
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700 }}>
+                                            <AlertTriangle size={12} />
+                                            <span>质检验收门控触发告警:</span>
+                                        </div>
+                                        {step.warnings.map((w, wIdx) => (
+                                            <div key={wIdx} style={{ paddingLeft: 16 }}>
+                                                {w}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}
+
+                    {/* 正在进行的实时流式动态占位 */}
+                    {isStreaming && (
+                        <div style={{ display: 'flex', gap: 8, paddingLeft: 4 }}>
+                            <div style={{
+                                width: 18,
+                                height: 18,
+                                borderRadius: '50%',
+                                background: '#f59e0b',
+                                color: '#ffffff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 9.5,
+                                fontWeight: 700
+                            }}>
+                                {steps.length + 1}
+                            </div>
+                            <div style={{
+                                flex: 1,
+                                background: '#fffbeb',
+                                border: '1px dashed #fde68a',
+                                borderRadius: 5,
+                                padding: '6px 8px',
+                                fontSize: 11,
+                                color: '#92400e',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6
+                            }}>
+                                <Loader2 size={12} className="animate-spin" />
+                                <span>{activeStatus || 'Gemini 多模态视觉推理与解剖质检中...'}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>

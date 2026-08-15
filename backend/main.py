@@ -1,9 +1,11 @@
 import os
 import sys
+import json
 import numpy as np
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -193,9 +195,30 @@ def interact(req: ChatRequest):
         "layer_name": layer_name,
         "metrics": result.get("metrics", {}),
         "executed_tools": result.get("executed_tools", []),
+        "thought_steps": result.get("thought_steps", []),
         "elapsed_ms": result.get("elapsed_ms", 0),
         "current_branch": agent_engine.dag.current_branch
     }
+
+@app.post("/api/chat/stream")
+def chat_stream(req: ChatRequest):
+    """
+    医生自然语言交互【实时 SSE 流式推送接口】
+    实时逐帧推送每个阶段的 Thought、Action、Observation、质检告警与最新 Mask 版本！
+    """
+    user_prompt = (req.prompt or req.message or "").strip()
+    if not user_prompt:
+        raise HTTPException(status_code=400, detail="Prompt 不能为空")
+
+    def event_generator():
+        for event in agent_engine.process_user_instruction_stream(user_prompt):
+            # 实时同步最新的 Mask 数据到 PACS 技能引擎
+            if event.get("type") in ["action_done", "complete"]:
+                curr_mask = agent_engine.dag.get_current_mask()
+                skills_engine.set_mask_3d(curr_mask)
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/api/undo")
 def undo():

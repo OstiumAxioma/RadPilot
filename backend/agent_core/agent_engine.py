@@ -4,7 +4,7 @@ import time
 import requests
 import numpy as np
 from scipy import ndimage
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Generator
 
 from .tools.base_tool import ImageContext, ToolResult
 from .tools.registry import GLOBAL_TOOL_REGISTRY, ToolRegistry
@@ -14,7 +14,7 @@ from .multimodal.slice_encoder import MultiModalSliceEncoder
 class AgentEngine:
     """
     RadPilot 专业医学影像 ReAct 自主推理引擎
-    具备【执行-质检验收-反思精修 (Execution -> Verification Gate -> Refinement)】闭环状态机
+    支持流式推送 (SSE) 与【执行-质检验收-精修】强闭环状态机
     """
     def __init__(
         self,
@@ -62,9 +62,10 @@ class AgentEngine:
             spacing=self.spacing
         )
 
-    def process_user_instruction(self, user_prompt: str) -> Dict[str, Any]:
+    def process_user_instruction_stream(self, user_prompt: str) -> Generator[Dict[str, Any], None, None]:
         """
-        核心 ReAct 自主精修与质检验收闭环循环 (Execution & Verification Gate Loop)
+        核心 ReAct 自主精修与质检验收流式生成器 (Streaming ReAct Loop)
+        向前端逐帧实时推送每个阶段的 Thought、Action、Observation 与质检结论！
         """
         start_time = time.time()
         context = self.get_current_context()
@@ -76,7 +77,8 @@ class AgentEngine:
             prev_node = self.dag.undo()
             elapsed = int((time.time() - start_time) * 1000)
             if prev_node:
-                return {
+                yield {
+                    "type": "complete",
                     "reply": f"已成功撤销至历史版本 [{prev_node.node_id}] ({prev_node.action_name})。当前标定体积: {prev_node.metrics.get('current_volume_cm3', 0)} cm³。",
                     "action": "UNDO",
                     "source": "VERSION_DAG",
@@ -86,20 +88,24 @@ class AgentEngine:
                     "elapsed_ms": elapsed,
                     "thought_steps": []
                 }
-            return {
-                "reply": "已处于版本树的初始根节点 (v0)，无法继续撤销。",
-                "action": "UNDO_FAILED",
-                "source": "VERSION_DAG",
-                "current_version": self.dag.current_node_id,
-                "elapsed_ms": elapsed,
-                "thought_steps": []
-            }
+            else:
+                yield {
+                    "type": "complete",
+                    "reply": "已处于版本树的初始根节点 (v0)，无法继续撤销。",
+                    "action": "UNDO_FAILED",
+                    "source": "VERSION_DAG",
+                    "current_version": self.dag.current_node_id,
+                    "elapsed_ms": elapsed,
+                    "thought_steps": []
+                }
+            return
 
         if prompt_lower in ["重做", "redo", "下一步", "前进"]:
             next_node = self.dag.redo()
             elapsed = int((time.time() - start_time) * 1000)
             if next_node:
-                return {
+                yield {
+                    "type": "complete",
                     "reply": f"已成功重做至版本分支 [{next_node.node_id}] ({next_node.action_name})。当前标定体积: {next_node.metrics.get('current_volume_cm3', 0)} cm³。",
                     "action": "REDO",
                     "source": "VERSION_DAG",
@@ -109,17 +115,21 @@ class AgentEngine:
                     "elapsed_ms": elapsed,
                     "thought_steps": []
                 }
-            return {
-                "reply": "当前分支已是最新版本节点，没有可重做的后续历史。",
-                "action": "REDO_FAILED",
-                "source": "VERSION_DAG",
-                "current_version": self.dag.current_node_id,
-                "elapsed_ms": elapsed,
-                "thought_steps": []
-            }
+            else:
+                yield {
+                    "type": "complete",
+                    "reply": "当前分支已是最新版本节点，没有可重做的后续历史。",
+                    "action": "REDO_FAILED",
+                    "source": "VERSION_DAG",
+                    "current_version": self.dag.current_node_id,
+                    "elapsed_ms": elapsed,
+                    "thought_steps": []
+                }
+            return
 
         if not self.api_key:
-            return {
+            yield {
+                "type": "complete",
                 "reply": "未检测到有效的 Gemini API 密钥，请检查 api/gemini_testAPI.txt 配置。",
                 "action": "AUTH_ERROR",
                 "source": "AGENT_ENGINE",
@@ -127,6 +137,7 @@ class AgentEngine:
                 "elapsed_ms": int((time.time() - start_time) * 1000),
                 "thought_steps": []
             }
+            return
 
         system_instruction = (
             "你是一个具备原生多模态视觉空间推理与【执行-验收-精修】严谨闭环的资深放射学智能体 RadPilot。\n"
@@ -143,8 +154,8 @@ class AgentEngine:
             f"- 影像信号强度范围: [{env_summary['image_min_intensity']}, {env_summary['image_max_intensity']}], 均值: {env_summary['image_mean_intensity']}\n\n"
             "【必须严格遵循的 ReAct 执行与质检验收流程 (Verification Gate Loop)】:\n"
             "1. 【阶段一: 初始提取】: 调用 `extract_brain_tissue`、`spatial_prompt_guided_segmentation` 或 `threshold_range` 等工具完成初始掩码生成；\n"
-            "2. 【阶段二: 质量审查与反思验收 (Quality Inspection)】: 系统在每个工具执行后都会重新截取叠加上 Mask 的最新画廊切片并计算连通域孤岛数。你必须审视最新切片与指标，若发现孤立杂质或边缘孔洞，必须继续调用 `island_and_smooth` 或 `erase_brush_3d`/`scissors_cut` 进行二次精修；\n"
-            "3. 【阶段三: 终审报告】: 只有在确认掩码解剖准确、无多余外皮、无孤岛碎屑时，方可输出最终临床定量报告。\n"
+            "2. 【阶段二: 质量审查与反思验收 (Quality Inspection)】: 系统在每个工具执行后都会重新截取叠加上 Mask 的最新画廊切片并计算连通域孤岛数。你必须审视最新切片与指标，若发现孤立杂质、中线越界过分割或边缘孔洞，必须继续调用 `scissors_cut`、`erase_brush_3d` 或 `island_and_smooth` 进行二次精修；\n"
+            "3. 【阶段三: 终审报告】: 只有在确认掩码解剖准确、无多余外皮、无过分割溢出、无孤岛碎屑时，方可输出最终临床定量报告。\n"
             "在调用每个工具前，必须显式输出一段【Thought】说明诊断思考与工具调用动机。"
         )
 
@@ -156,7 +167,6 @@ class AgentEngine:
             current_mask=context.current_mask
         )
 
-        # 构建对话历史
         conversation_contents = [
             {
                 "role": "user",
@@ -175,11 +185,20 @@ class AgentEngine:
         last_node_id = self.dag.current_node_id
 
         # -------------------------------------------------------------
-        # 核心 ReAct 状态机循环 (执行 -> 质检反馈 -> 再精修)
+        # ReAct 多轮循环状态机
         # -------------------------------------------------------------
         for iteration in range(1, self.max_iterations + 1):
             step_start = time.time()
             
+            # 推送本轮步骤开始事件
+            yield {
+                "type": "step_start",
+                "step_index": iteration,
+                "iteration": iteration,
+                "status": "THINKING",
+                "message": f"正在审视三维正交画廊并进行第 {iteration} 轮解剖推理与决策..."
+            }
+
             payload = {
                 "contents": conversation_contents,
                 "systemInstruction": {
@@ -213,7 +232,6 @@ class AgentEngine:
                 candidate_content = candidates[0].get("content", {})
                 parts = candidate_content.get("parts", [])
 
-                # 解析本轮输出的 Thought 与 Tool Calls
                 tool_calls = []
                 text_chunks = []
                 for p in parts:
@@ -224,23 +242,38 @@ class AgentEngine:
 
                 current_thought = "\n".join(text_chunks).strip()
 
-                # 如果模型没有触发工具调用：说明模型认为质检完全通过，输出终审报告
+                # 推送 Thought 事件
+                if current_thought:
+                    yield {
+                        "type": "thought",
+                        "step_index": iteration,
+                        "thought": current_thought
+                    }
+
+                # 若无 Tool 调用，说明质检通过，准备输出最终报告
                 if not tool_calls:
                     final_clinical_reply = current_thought or "已完成解剖分割并通过质检验收。"
                     break
 
-                # 依次执行工具下发
+                # 依次执行下发的工具
                 for call in tool_calls:
                     tool_name = call.get("name")
                     tool_args = call.get("args", {})
                     last_action_name = tool_name.upper()
+
+                    # 推送 Action 启动事件
+                    yield {
+                        "type": "action_start",
+                        "step_index": iteration,
+                        "action_name": tool_name,
+                        "action_params": tool_args
+                    }
 
                     # 执行工具
                     current_ctx = self.get_current_context()
                     tool_res = self.tool_registry.execute_tool(tool_name, current_ctx, **tool_args)
                     
                     if tool_res.success:
-                        # 提交 DAG 版本节点
                         new_node = self.dag.commit(
                             action_name=f"{tool_name.upper()}_S{iteration}",
                             prompt=user_prompt,
@@ -253,14 +286,17 @@ class AgentEngine:
 
                     step_elapsed = int((time.time() - step_start) * 1000)
 
-                    # 计算质控指标 (连通分支数、孔洞数等)
+                    # 质控自检
                     curr_mask = self.dag.get_current_mask()
                     labeled_islands, island_count = ndimage.label(curr_mask > 0)
-                    
+                    current_vol_cm3 = tool_res.observation_metrics.get('current_volume_cm3', 0.0)
+                    dim_x, dim_y, dim_z = context.shape
+                    mid_x = dim_x // 2
+
                     obs_summary = (
                         f"已执行 {tool_res.message}。"
                         f"变化体积: {tool_res.observation_metrics.get('volume_change_mm3', 0)} mm³，"
-                        f"当前标定总体积: {tool_res.observation_metrics.get('current_volume_cm3', 0)} cm³。"
+                        f"当前标定总体积: {current_vol_cm3} cm³。"
                         f"【质检指标】独立连通分支数: {island_count}。"
                     )
                     
@@ -272,24 +308,21 @@ class AgentEngine:
                         "action_params": tool_args,
                         "observation": obs_summary,
                         "metrics": tool_res.observation_metrics,
+                        "mask_version": last_node_id,
                         "elapsed_ms": step_elapsed
                     }
                     thought_steps.append(step_info)
 
-                    # -------------------------------------------------------------
-                    # 【核心验收门控 (Verification Gate)】:
-                    # 全方位进行过分割 (Over-segmentation)、欠分割 (Under-segmentation) 与解剖中线越界自检
-                    # -------------------------------------------------------------
-                    curr_mask = self.dag.get_current_mask()
-                    labeled_islands, island_count = ndimage.label(curr_mask > 0)
-                    current_vol_cm3 = tool_res.observation_metrics.get('current_volume_cm3', 0.0)
-                    dim_x, dim_y, dim_z = context.shape
-                    mid_x = dim_x // 2
+                    # 推送 Action 完成与 Observation 指标事件 (前端此时可立即呈现该步骤与更新视图！)
+                    yield {
+                        "type": "action_done",
+                        "step_index": iteration,
+                        "step_data": step_info,
+                        "current_version": last_node_id
+                    }
 
-                    # 1. 深度过分割与越界自检
+                    # 过分割与中线越界深度自检
                     leakage_warnings = []
-                    
-                    # 检查 1: 单侧大脑半球中线越界检查
                     if any(k in user_prompt for k in ["左脑", "左半球", "left"]):
                         overflow_right = int(np.count_nonzero(curr_mask[:mid_x, :, :] > 0))
                         if overflow_right > 50:
@@ -311,17 +344,24 @@ class AgentEngine:
                         if current_vol_cm3 > 200.0:
                             leakage_warnings.append(f"【小脑生理容积过分割】: 当前体积 ({current_vol_cm3} cm³) 超过正常成人小脑范围 (120~180 cm³)，存在过度包绕！")
 
-                    # 检查 2: 独立孤岛碎屑检查
                     if island_count > 1:
                         leakage_warnings.append(f"【孤立碎屑伪影】: 存在 {island_count} 个独立不连通的离散孤岛，建议调用 `island_and_smooth` 过滤杂质。")
 
-                    # 重新截取叠加了最新 Mask 的画廊图像
                     overlay_slices = MultiModalSliceEncoder.encode_multiview_slices(
                         self.image_data,
                         current_mask=curr_mask
                     )
 
                     warning_text = "\n".join([f"- ⚠️ {w}" for w in leakage_warnings]) if leakage_warnings else "- ✅ 各项解剖边界与生理容积指标质检正常，未检测到明显过分割或中线泄漏。"
+
+                    # 推送质检验收门控触发事件
+                    yield {
+                        "type": "verification_gate",
+                        "step_index": iteration,
+                        "warnings": leakage_warnings,
+                        "island_count": island_count,
+                        "volume_cm3": current_vol_cm3
+                    }
 
                     inspection_prompt = (
                         f"【系统质检验收与过分割自检反馈 (Iteration {iteration})】:\n"
@@ -335,7 +375,6 @@ class AgentEngine:
                         "3. 【终审合格】: 只有在确认掩码解剖完全严密、无过分割、无孤岛碎屑时，方可输出最终临床评估总结。"
                     )
 
-                    # 追加到对话历史，驱动大模型进入下一轮 Loop
                     conversation_contents.append(candidate_content)
                     conversation_contents.append({
                         "role": "user",
@@ -367,7 +406,9 @@ class AgentEngine:
         current_node = self.dag.nodes.get(last_node_id)
         latest_metrics = current_node.metrics if current_node else env_summary
 
-        return {
+        # 推送最终完成汇总事件
+        yield {
+            "type": "complete",
             "reply": final_clinical_reply,
             "action": last_action_name,
             "source": "REACT_VERIFICATION_LOOP",
@@ -378,3 +419,11 @@ class AgentEngine:
             "elapsed_ms": total_elapsed,
             "thought_steps": thought_steps
         }
+
+    def process_user_instruction(self, user_prompt: str) -> Dict[str, Any]:
+        """非流式兼容接口 (聚合 stream 输出)"""
+        last_result = {}
+        for event in self.process_user_instruction_stream(user_prompt):
+            if event.get("type") == "complete":
+                last_result = event
+        return last_result
