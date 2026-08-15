@@ -296,6 +296,13 @@ export default function Vtk2DSliceViewer({
 
         if (maskData && activeLayer && activeLayer.visible) {
             maskMapper.setInputData(maskData);
+            if (axis === 'axial') {
+                maskMapper.setKSlice(sliceIndex);
+            } else if (axis === 'coronal') {
+                maskMapper.setJSlice(sliceIndex);
+            } else {
+                maskMapper.setISlice(sliceIndex);
+            }
             maskSlice.setVisibility(true);
 
             const hex = activeLayer.color || '#06b6d4';

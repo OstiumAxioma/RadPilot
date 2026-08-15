@@ -21,6 +21,7 @@ import {
 import Vtk2DSliceViewer from './components/Vtk2DSliceViewer';
 import Vtk3DVolumeViewer from './components/Vtk3DVolumeViewer';
 import ErrorBoundary from './components/ErrorBoundary';
+import MarkdownRenderer from './components/MarkdownRenderer';
 
 /**
  * 将后端返回的标准 VTK Payload 转换为前端原生的 vtkImageData 实体
@@ -608,7 +609,9 @@ export default function App() {
                                 <span className="bubble-sender">
                                     {msg.sender === 'user' ? '医生' : 'RadPilot Agent'}
                                 </span>
-                                <div className="bubble-content">{msg.text}</div>
+                                <div className="bubble-content">
+                                    <MarkdownRenderer content={msg.text} />
+                                </div>
                                 {msg.meta && (
                                     <div className="agent-meta">
                                         {msg.meta.action && <span className="meta-tag">ACTION: {msg.meta.action}</span>}

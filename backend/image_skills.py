@@ -28,8 +28,13 @@ class ImageSkillsEngine:
         data = self.img_nii.get_fdata()
         self.volume_data = np.nan_to_num(data)
         self.affine = self.img_nii.affine
+        self.nii_affine = self.img_nii.affine
         self.header = self.img_nii.header
         self.shape = self.volume_data.shape
+        
+        # 提取真实物理体素间距 (Spacing)
+        zooms = self.header.get_zooms()[:3] if self.header else (1.0, 1.0, 1.0)
+        self.spacing = tuple(float(z) for z in zooms)
         
         # 初始化空白 3D Mask (uint8: 0 为背景, 255 为前景)
         self.current_mask_3d = np.zeros(self.shape, dtype=np.uint8)
@@ -187,20 +192,23 @@ class ImageSkillsEngine:
     def get_mask_vtk_payload(self) -> dict:
         """
         导出专供 @kitware/vtk.js vtkImageData 构造的标准 3D Mask 体数据载荷
-        与 get_volume_vtk_payload 完全相同的几何空间与 Fortran-order 排布
+        将前景非零体素统一映射为 255，与 get_volume_vtk_payload 完全相同的几何空间与 Fortran-order 排布
         """
-        mask_uint8 = self.current_mask_3d.astype(np.uint8)
+        # 前景统一放大至 255，确保 VTK 标量传输与透明度映射正常触发
+        mask_uint8 = (self.current_mask_3d > 0).astype(np.uint8) * 255
         flat_bytes = np.ascontiguousarray(mask_uint8.ravel(order='F')).tobytes()
         encoded = base64.b64encode(flat_bytes).decode("utf-8")
 
         return {
             "dimensions": [int(self.shape[0]), int(self.shape[1]), int(self.shape[2])],
-            "spacing": [1.0, 1.0, 1.0],
+            "spacing": list(self.spacing),
             "origin": [0.0, 0.0, 0.0],
             "scalar_range": [0, 255],
             "raw_base64": encoded,
             "has_mask": bool(np.any(mask_uint8 > 0))
         }
+
+    get_mask_volume_vtk_payload = get_mask_vtk_payload
 
     # -------------------------------------------------------------
     # 医疗图像处理算子 (Image Tool Skills)
