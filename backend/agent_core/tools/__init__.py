@@ -8,16 +8,24 @@ from .interactive_tools import (
     ScissorsCutTool,
     RegionGrowthTool,
     FillBetweenSlicesTool,
-    IslandAndSmoothTool
+    IslandAndSmoothTool,
+    DrawPolygonContourTool,
+    ContourScissorsCutTool,
+    MarkerControlledWatershedTool,
+    SmartIntensityBrushTool
 )
 from .morphology_tools import (
+    AnalyzeConnectivityTool,
     MorphologicalDilationTool,
     MorphologicalErosionTool,
     ConnectedComponentFilterTool,
     MorphologicalSmoothTool
 )
+from .inspection_tools import (
+    InspectOrthoSliceTool,
+    BrowseSliceGalleryTool
+)
 from .segmentation_tools import (
-    BrainTissueExtractionTool,
     IntensityThresholdSegmentationTool,
     ResetMaskTool
 )
@@ -28,7 +36,14 @@ __all__ = [
     "ToolResult",
     "ToolRegistry",
     "GLOBAL_TOOL_REGISTRY",
+    "InspectOrthoSliceTool",
+    "BrowseSliceGalleryTool",
+    "AnalyzeConnectivityTool",
     "SpatialPromptGuidedSegmentationTool",
+    "MarkerControlledWatershedTool",
+    "SmartIntensityBrushTool",
+    "DrawPolygonContourTool",
+    "ContourScissorsCutTool",
     "ThresholdRangeTool",
     "PaintBrush3DTool",
     "EraseBrush3DTool",
@@ -40,7 +55,6 @@ __all__ = [
     "MorphologicalErosionTool",
     "ConnectedComponentFilterTool",
     "MorphologicalSmoothTool",
-    "BrainTissueExtractionTool",
     "IntensityThresholdSegmentationTool",
     "ResetMaskTool"
 ]

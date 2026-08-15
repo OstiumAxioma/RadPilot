@@ -62,7 +62,8 @@ class ToolResult:
         observation_metrics: Optional[Dict[str, Any]] = None,
         message: str = "",
         error_message: Optional[str] = None,
-        action_description: Optional[str] = None
+        action_description: Optional[str] = None,
+        attached_image_part: Optional[Dict[str, Any]] = None
     ):
         self.success = success
         self.new_mask = new_mask if new_mask is not None else np.zeros((0, 0, 0), dtype=np.uint8)
@@ -70,6 +71,7 @@ class ToolResult:
         self.message = message or action_description or ("操作成功" if success else "操作失败")
         self.action_description = self.message
         self.error_message = error_message
+        self.attached_image_part = attached_image_part
 
     def to_dict(self) -> Dict[str, Any]:
         return {

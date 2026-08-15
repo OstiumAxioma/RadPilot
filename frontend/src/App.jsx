@@ -267,10 +267,10 @@ export default function App() {
             }
         ]);
 
-        fetch('http://localhost:8000/api/chat/stream', {
+        fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: userMsg.text, message: userMsg.text, current_version: currentVersion })
+            body: JSON.stringify({ prompt: userMsg.text, message: userMsg.text, current_version: currentVersion, max_iterations: 50 })
         })
             .then(async response => {
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);

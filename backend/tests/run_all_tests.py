@@ -10,7 +10,12 @@ py_exec = sys.executable
 TEST_FILES = [
     "test_agent_core.py",
     "test_multimodal_agent.py",
-    "test_react_loop.py"
+    "test_react_loop.py",
+    "test_polygon_and_scissors.py",
+    "test_cerebellum_segmentation.py",
+    "test_inspection_scaffolding.py",
+    "test_watershed_and_smart_brush.py",
+    "test_connectivity_analysis.py"
 ]
 
 def run_suite():

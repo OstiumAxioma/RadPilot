@@ -7,15 +7,23 @@ from .interactive_tools import (
     ScissorsCutTool,
     RegionGrowthTool,
     FillBetweenSlicesTool,
-    IslandAndSmoothTool
+    IslandAndSmoothTool,
+    DrawPolygonContourTool,
+    ContourScissorsCutTool,
+    MarkerControlledWatershedTool,
+    SmartIntensityBrushTool
+)
+from .inspection_tools import (
+    InspectOrthoSliceTool,
+    BrowseSliceGalleryTool
 )
 from .guided_refinement_tools import SpatialPromptGuidedSegmentationTool
 from .segmentation_tools import (
-    BrainTissueExtractionTool,
     IntensityThresholdSegmentationTool,
     ResetMaskTool
 )
 from .morphology_tools import (
+    AnalyzeConnectivityTool,
     MorphologicalDilationTool,
     MorphologicalErosionTool,
     ConnectedComponentFilterTool,
@@ -34,9 +42,20 @@ class ToolRegistry:
     def _register_default_tools(self):
         """注册所有内置核心医学图像工具"""
         default_tools = [
-            # 1. 原生多模态空间引导与区域生长
+            # 1. 放射学主动视觉探针与切片画廊导航
+            InspectOrthoSliceTool(),
+            BrowseSliceGalleryTool(),
+            # 2. 主动连通性深度拓扑检测与诊断探针
+            AnalyzeConnectivityTool(),
+            # 3. 连续曲线多边形绘制与自由剪刀
+            DrawPolygonContourTool(),
+            ContourScissorsCutTool(),
+            # 4. 原生多模态空间引导与区域生长
             SpatialPromptGuidedSegmentationTool(),
-            # 2. 放射科精细手动/半自动原子工具箱
+            # 5. 高级图割与 PS 智能边缘吸附工具箱
+            MarkerControlledWatershedTool(),
+            SmartIntensityBrushTool(),
+            # 6. 放射科通用精细原子工具箱 (3D Slicer / ITK-SNAP 范式)
             ThresholdRangeTool(),
             RegionGrowthTool(),
             PaintBrush3DTool(),
@@ -44,8 +63,8 @@ class ToolRegistry:
             ScissorsCutTool(),
             FillBetweenSlicesTool(),
             IslandAndSmoothTool(),
-            # 3. 基础解剖与形态学工具
-            BrainTissueExtractionTool(),
+            # 7. 通用形态学与连通域过滤算子
+            ConnectedComponentFilterTool(),
             MorphologicalDilationTool(),
             MorphologicalErosionTool(),
             ConnectedComponentFilterTool(),

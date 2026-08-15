@@ -50,6 +50,7 @@ class ChatRequest(BaseModel):
     prompt: Optional[str] = None
     message: Optional[str] = None
     current_version: Optional[str] = None
+    max_iterations: Optional[int] = 50
 
 @app.get("/api/info")
 def get_info():
@@ -211,7 +212,7 @@ def chat_stream(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Prompt 不能为空")
 
     def event_generator():
-        for event in agent_engine.process_user_instruction_stream(user_prompt):
+        for event in agent_engine.process_user_instruction_stream(user_prompt, max_iterations=req.max_iterations):
             # 实时同步最新的 Mask 数据到 PACS 技能引擎
             if event.get("type") in ["action_done", "complete"]:
                 curr_mask = agent_engine.dag.get_current_mask()
@@ -287,6 +288,32 @@ def export_gold_standard():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
+
+@app.get("/api/logs")
+def get_recent_logs(limit: int = 10):
+    """获取后端持久化的最近思维链日志文件列表与最新内容"""
+    try:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        if not os.path.exists(log_dir):
+            return {"logs": [], "latest_content": ""}
+        
+        files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
+        files.sort(reverse=True)
+        recent_files = files[:limit]
+        
+        latest_content = ""
+        if recent_files:
+            latest_path = os.path.join(log_dir, recent_files[0])
+            with open(latest_path, "r", encoding="utf-8") as lf:
+                latest_content = lf.read()
+                
+        return {
+            "log_files": recent_files,
+            "latest_file": recent_files[0] if recent_files else None,
+            "latest_content": latest_content
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
