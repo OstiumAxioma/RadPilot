@@ -133,14 +133,49 @@ def get_volume_atlas():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class ChatRequest(BaseModel):
+    prompt: Optional[str] = None
+    message: Optional[str] = None
+    current_version: Optional[str] = None
+
+@app.post("/api/chat")
 @app.post("/api/interact")
-def interact(req: InteractRequest):
-    """医生自然语言交互接口"""
-    if not req.prompt or not req.prompt.strip():
+def interact(req: ChatRequest):
+    """医生自然语言交互接口 (同时支持 /api/chat 与 /api/interact)"""
+    user_prompt = (req.prompt or req.message or "").strip()
+    if not user_prompt:
         raise HTTPException(status_code=400, detail="Prompt 不能为 blank")
     
-    result = harness.process_doctor_input(req.prompt.strip())
-    return result
+    result = harness.process_doctor_input(user_prompt)
+    
+    # 格式化兼容返回值给前端
+    current_ver = result.get("current_version", f"v{harness.current_version_index}")
+    action = result.get("action", "INSPECT")
+    msg = result.get("message", "指令已成功解析并执行。")
+    
+    layer_map = {
+        "SKULL_STRIP": "脑实质分割图层",
+        "EXPAND": "Mask 外扩图层",
+        "SHRINK": "Mask 收缩图层",
+        "REMOVE_ARTIFACTS": "去伪影图层",
+        "INVERT": "反相 Mask 图层",
+        "RESET": "重置 Mask"
+    }
+    layer_name = layer_map.get(action, f"分割图层 ({current_ver})")
+
+    return {
+        "status": result.get("status", "success"),
+        "reply": msg,
+        "message": msg,
+        "action": action,
+        "action_type": action,
+        "source": result.get("source", "GEMINI_ROUTER"),
+        "current_version": current_ver,
+        "new_version": current_ver if result.get("status") == "success" and action not in ["UNKNOWN", "INSPECT"] else None,
+        "layer_name": layer_name,
+        "elapsed_ms": result.get("elapsed_ms", 0),
+        "state": harness.state
+    }
 
 @app.post("/api/tool")
 def execute_tool(req: ToolCallRequest):

@@ -165,30 +165,35 @@ export default function App() {
         fetch('http://localhost:8000/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: userMsg.text, current_version: currentVersion })
+            body: JSON.stringify({ prompt: userMsg.text, message: userMsg.text, current_version: currentVersion })
         })
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                return res.json();
+            })
             .then(data => {
                 setIsProcessing(false);
+                const replyText = data.reply || data.message || '指令执行完毕。';
+                
                 setChatMessages(prev => [
                     ...prev,
                     {
                         id: (Date.now() + 1).toString(),
                         sender: 'agent',
-                        text: data.reply || '指令执行完毕。',
+                        text: replyText,
                         meta: {
-                            action: data.action_type || 'INSPECT',
+                            action: data.action_type || data.action || 'INSPECT',
                             source: data.source || 'GEMINI_ROUTER',
                             elapsed: data.elapsed_ms || 0
                         }
                     }
                 ]);
 
-                if (data.new_version) {
-                    const versionId = data.new_version;
+                const versionId = data.new_version || data.current_version;
+                if (versionId && versionId !== 'v0') {
                     setCurrentVersion(versionId);
 
-                    const colorPalette = ['#06b6d4', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
+                    const colorPalette = ['#06b6d4', '#3b82f6', '#e11d48', '#16a34a', '#d97706', '#9333ea'];
                     const defaultColor = colorPalette[labelLayers.length % colorPalette.length];
                     const layerName = data.layer_name || `分割图层 (${versionId})`;
 
@@ -197,11 +202,20 @@ export default function App() {
                         ...prev.filter(l => l.id !== versionId)
                     ]);
                 }
-                setHarnessState('PAUSED_FOR_DOCTOR');
+                setHarnessState(data.state || 'PAUSED_FOR_DOCTOR');
             })
             .catch(err => {
                 console.error('交互错误:', err);
                 setIsProcessing(false);
+                setChatMessages(prev => [
+                    ...prev,
+                    {
+                        id: (Date.now() + 1).toString(),
+                        sender: 'agent',
+                        text: `通信异常: 无法连接至后端服务 (${err.message})`,
+                        meta: { action: 'ERROR', source: 'NETWORK' }
+                    }
+                ]);
                 setHarnessState('PAUSED_FOR_DOCTOR');
             });
     };
@@ -496,6 +510,15 @@ export default function App() {
                                 )}
                             </div>
                         ))}
+                        {isProcessing && (
+                            <div className="chat-bubble agent" style={{ borderLeftColor: '#0284c7', background: '#f8fafc' }}>
+                                <span className="bubble-sender">RadPilot Agent</span>
+                                <div className="bubble-content" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#0284c7', fontWeight: 600 }}>
+                                    <Sparkles size={12} />
+                                    <span>Gemini 意图解析与医学算子调度中...</span>
+                                </div>
+                            </div>
+                        )}
                         <div ref={chatBottomRef} />
                     </div>
 
