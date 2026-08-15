@@ -58,15 +58,17 @@ class ToolResult:
     def __init__(
         self,
         success: bool,
-        new_mask: np.ndarray,
-        observation_metrics: Dict[str, Any],
-        message: str,
-        error_message: Optional[str] = None
+        new_mask: Optional[np.ndarray] = None,
+        observation_metrics: Optional[Dict[str, Any]] = None,
+        message: str = "",
+        error_message: Optional[str] = None,
+        action_description: Optional[str] = None
     ):
         self.success = success
-        self.new_mask = new_mask
-        self.observation_metrics = observation_metrics
-        self.message = message
+        self.new_mask = new_mask if new_mask is not None else np.zeros((0, 0, 0), dtype=np.uint8)
+        self.observation_metrics = observation_metrics or {}
+        self.message = message or action_description or ("操作成功" if success else "操作失败")
+        self.action_description = self.message
         self.error_message = error_message
 
     def to_dict(self) -> Dict[str, Any]:

@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional
 from .tools.base_tool import ImageContext, ToolResult
 from .tools.registry import GLOBAL_TOOL_REGISTRY, ToolRegistry
 from .version_dag import VersionDAG, VersionNode
+from .multimodal.slice_encoder import MultiModalSliceEncoder
 
 class AgentEngine:
     """
@@ -121,27 +122,39 @@ class AgentEngine:
             }
 
         system_instruction = (
-            "你是一个专业、严谨的放射学智能体 RadPilot。你正在辅助放射科医生对三维医学影像进行解剖学分析与精准分割。\n"
-            f"【当前影像物理环境信息】:\n"
-            f"- 空间维度 (Shape): {env_summary['image_dimensions']}\n"
+            "你是一个具备原生多模态视觉空间推理能力的放射学智能体 RadPilot。\n"
+            "【多模态视觉输入说明】:\n"
+            "系统已为你提供了当前三维医学体数据的正交三视角中心断层切片:\n"
+            "1. 【第一张图】: 轴位横断面 (Axial MPR, Anterior/鼻侧向上)\n"
+            "2. 【第二张图】: 冠状位切片 (Coronal MPR, Superior/头顶向上)\n"
+            "3. 【第三张图】: 矢状位侧面切片 (Sagittal MPR, Superior/头顶向上, Anterior/面部朝左)\n\n"
+            f"【物理空间元数据】:\n"
+            f"- 空间维度 (Shape: X, Y, Z): {env_summary['image_dimensions']}\n"
             f"- 物理体素间距 (Spacing mm): {env_summary['voxel_spacing_mm']}\n"
             f"- 单个体素物理体积: {env_summary['voxel_volume_mm3']} mm³\n"
-            f"- 当前已有 Mask 标定体素量: {env_summary['mask_total_voxels']}\n"
             f"- 当前已有 Mask 标定体积: {env_summary['mask_volume_cm3']} cm³\n"
             f"- 影像信号强度范围: [{env_summary['image_min_intensity']}, {env_summary['image_max_intensity']}], 均值: {env_summary['image_mean_intensity']}\n\n"
             "【行为规范】:\n"
-            "1. 仔细分析医生的临床意图。若医生的指令需要进行图像计算（如去颅骨、脑实质提取、外扩、收缩、连通域去噪、阈值分割等），请必须调用对应的 Tool。\n"
-            "2. 若医生仅询问影像基本信息或咨询医学问题，请给出专业、简练的放射学解答。\n"
-            "3. 绝对不要随意猜测或虚构非工具范围的指令。"
+            "1. 仔细审视传入的三视角影像。若医生要求分割任意解剖器官（如小脑、脑干、侧脑室、白质、垂体、肿瘤等），请基于你真实看到的切片图像，调用 `spatial_prompt_guided_segmentation` 或专有解剖工具，下发你所定位的 3D Bounding Box [x_min, y_min, z_min, x_max, y_max, z_max] 与空间中心种子点。\n"
+            "2. 若医生要求对已有掩码进行外扩、收缩、连通域过滤或平滑，请调用对应的形态学工具。\n"
+            "3. 工具执行完毕后，系统会将底层计算出的真实物理指标（体积 mm³/cm³、Dice 相似度、包围盒等）反馈给你，请据此给出专业、严谨的放射学定量报告。"
         )
 
         tools_declarations = self.tool_registry.get_function_declarations()
+
+        # 动态截取当前影像的多视角切片图像帧 (JPEG Base64)
+        multiview_image_parts = MultiModalSliceEncoder.encode_multiview_slices(
+            self.image_data,
+            current_mask=context.current_mask
+        )
+
+        user_parts = multiview_image_parts + [{"text": user_prompt}]
 
         payload = {
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": user_prompt}]
+                    "parts": user_parts
                 }
             ],
             "systemInstruction": {

@@ -11,6 +11,7 @@ from .segmentation_tools import (
     IntensityThresholdSegmentationTool,
     ResetMaskTool
 )
+from .guided_refinement_tools import SpatialPromptGuidedSegmentationTool
 
 class ToolRegistry:
     """
@@ -24,6 +25,7 @@ class ToolRegistry:
     def _register_default_tools(self):
         """注册所有内置核心医学图像工具"""
         default_tools = [
+            SpatialPromptGuidedSegmentationTool(),
             BrainTissueExtractionTool(),
             MorphologicalDilationTool(),
             MorphologicalErosionTool(),
