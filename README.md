@@ -44,7 +44,8 @@
 | **ASGI Server** | Uvicorn | ≥ 0.28.0 | Production-ready ASGI web server |
 | **Medical Imaging** | NiBabel / OpenCV / NumPy / Pillow | NiBabel ≥ 5.2.0, OpenCV ≥ 4.9.0 | NIfTI file parsing, 2D/3D morphological operators |
 | **Frontend Framework** | React / Vite | React 18.2.0 / Vite 5.1.6 | Reactive medical workstation UI |
-| **3D Rendering** | Three.js | 0.185.1 | WebGL 3D volume, world axes, and mask rendering |
+| **UI Design System** | Pixel-Perfect UI (Precision Crafted) | Latest | Micro-tactile 3D buttons, Inter Tight typography, precision chips |
+| **3D Rendering** | @kitware/vtk.js | 36.6.2 | Native WebGL 2D orthoslices and GPU Ray-Marching 3D volume |
 | **LLM Router** | Google Gemini API | Gemini Flash | Intent parsing and operator planning |
 
 ---

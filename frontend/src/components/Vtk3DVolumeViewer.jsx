@@ -32,7 +32,7 @@ export default function Vtk3DVolumeViewer({
     const maskCfunRef = useRef(null);
     const maskOfunRef = useRef(null);
     const orientationWidgetRef = useRef(null);
-    const [statusMsg, setStatusMsg] = useState('✨ 3D 体渲染已准备就绪');
+    const [statusMsg, setStatusMsg] = useState('GPU Ray Marching Engine (Active)');
 
     // 1. 初始化 3D WebGL GenericRenderWindow 与独立子 Renderer 坐标轴系统 (仅在 volumeData 有效时)
     useEffect(() => {
@@ -40,12 +40,13 @@ export default function Vtk3DVolumeViewer({
         if (!container || !volumeData) return;
 
         const grw = vtkGenericRenderWindow.newInstance({
-            background: [0.06, 0.09, 0.16] // Slate 暗色背景 (#0f172a)
+            background: [1.0, 1.0, 1.0] // 纯白高精背景 (#ffffff)
         });
         grw.setContainer(container);
         grwRef.current = grw;
 
         const renderer = grw.getRenderer();
+        renderer.setBackground(1.0, 1.0, 1.0);
         const renderWindow = grw.getRenderWindow();
         const interactor = grw.getInteractor();
 
@@ -63,9 +64,10 @@ export default function Vtk3DVolumeViewer({
         volume.getProperty().setScalarOpacity(0, ofun);
         volume.getProperty().setInterpolationTypeToLinear();
         volume.getProperty().setShade(true);
-        volume.getProperty().setAmbient(0.3);
-        volume.getProperty().setDiffuse(0.7);
-        volume.getProperty().setSpecular(0.4);
+        volume.getProperty().setAmbient(0.35);
+        volume.getProperty().setDiffuse(0.65);
+        volume.getProperty().setSpecular(0.40);
+        volume.getProperty().setSpecularPower(25.0);
 
         volumeRef.current = volume;
         volumeMapperRef.current = volumeMapper;
@@ -196,19 +198,22 @@ export default function Vtk3DVolumeViewer({
         const maxVal = Math.min(255, normWL + normWW / 2.0);
         const cutoff = Math.max(5, minVal + (maxVal - minVal) * volumeThreshold);
 
+        // 真实人体脑组织颜色传递函数 (Realistic Anatomical Color Transfer Function)
         cfun.removeAllPoints();
-        cfun.addRGBPoint(0, 0.0, 0.0, 0.0);
-        cfun.addRGBPoint(cutoff * 0.8, 0.1, 0.1, 0.15);
-        cfun.addRGBPoint((cutoff + maxVal) / 2, 0.8, 0.85, 0.95);
-        cfun.addRGBPoint(maxVal, 1.0, 1.0, 1.0);
-        cfun.addRGBPoint(255, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(0, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(cutoff, 0.88, 0.65, 0.60); // 脑脊液/皮层边缘: 浅珊瑚肉粉
+        cfun.addRGBPoint(cutoff + (maxVal - cutoff) * 0.25, 0.82, 0.54, 0.50); // 大脑皮层灰质: 真实灰质肉粉色
+        cfun.addRGBPoint(cutoff + (maxVal - cutoff) * 0.60, 0.96, 0.90, 0.82); // 大脑白质: 象牙暖白髓质色
+        cfun.addRGBPoint(maxVal, 0.98, 0.94, 0.88); // 颅底与硬膜致密组织: 象牙硬骨色
+        cfun.addRGBPoint(255, 1.0, 0.96, 0.90);
 
         ofun.removeAllPoints();
         ofun.addPoint(0, 0.0);
         ofun.addPoint(cutoff, 0.0);
-        ofun.addPoint(cutoff + 10, 0.15);
-        ofun.addPoint((cutoff + maxVal) / 2, 0.45);
-        ofun.addPoint(maxVal, 0.85);
+        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.15, 0.15);
+        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.35, 0.45);
+        ofun.addPoint(cutoff + (maxVal - cutoff) * 0.70, 0.80);
+        ofun.addPoint(maxVal, 0.92);
         ofun.addPoint(255, 0.95);
 
         renderWindow.render();
@@ -252,28 +257,38 @@ export default function Vtk3DVolumeViewer({
 
     if (!volumeData) {
         return (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: '#64748b', fontSize: 12 }}>
-                <span>⏳ 正在加载 VTK 3D 体数据...</span>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', color: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                <span>INITIALIZING VTK 3D RAY MARCHING...</span>
             </div>
         );
     }
 
     return (
-        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#0f172a' }}>
+        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#ffffff' }}>
             <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
             <div style={{
-                position: 'absolute', bottom: 8, left: 10,
-                fontSize: 10.5, color: '#e2e8f0',
-                background: 'rgba(15,23,42,0.85)', padding: '4px 10px',
+                position: 'absolute', bottom: 10, left: 12,
+                fontSize: 10.5, color: '#334155',
+                background: 'rgba(255, 255, 255, 0.94)', backdropFilter: 'blur(8px)',
+                padding: '4px 10px',
                 borderRadius: 4, pointerEvents: 'none',
-                display: 'flex', gap: 10, alignItems: 'center',
-                zIndex: 10, border: '1px solid rgba(255,255,255,0.1)',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+                display: 'flex', gap: 12, alignItems: 'center',
+                zIndex: 10, border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)'
             }}>
-                <span style={{ color: '#94a3b8' }}>{statusMsg}</span>
-                <span style={{ color: '#ef4444', fontWeight: 700 }}>■ X (红: 矢状)</span>
-                <span style={{ color: '#eab308', fontWeight: 700 }}>■ Y (黄: 冠状)</span>
-                <span style={{ color: '#22c55e', fontWeight: 700 }}>■ Z (绿: 轴位)</span>
+                <span style={{ color: '#64748b', fontFamily: 'var(--font-mono)', fontSize: 9.5 }}>{statusMsg}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#e11d48', fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 9.5 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 1, backgroundColor: '#e11d48', display: 'inline-block' }}></span>
+                    <span>X: 矢状</span>
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#d97706', fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 9.5 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 1, backgroundColor: '#d97706', display: 'inline-block' }}></span>
+                    <span>Y: 冠状</span>
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#16a34a', fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 9.5 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 1, backgroundColor: '#16a34a', display: 'inline-block' }}></span>
+                    <span>Z: 轴位</span>
+                </span>
             </div>
         </div>
     );

@@ -42,12 +42,13 @@ export default function Vtk2DSliceViewer({
         if (!container || !volumeData) return;
 
         const grw = vtkGenericRenderWindow.newInstance({
-            background: [0.06, 0.09, 0.16] // Slate 暗色背景 (#0f172a)
+            background: [1.0, 1.0, 1.0] // 纯白高精背景 (#ffffff)
         });
         grw.setContainer(container);
         grwRef.current = grw;
 
         const renderer = grw.getRenderer();
+        renderer.setBackground(1.0, 1.0, 1.0);
         const renderWindow = grw.getRenderWindow();
         const camera = renderer.getActiveCamera();
         camera.setParallelProjection(true); // 2D 医学切片严格使用平行正交投影
@@ -132,17 +133,17 @@ export default function Vtk2DSliceViewer({
         }
         renderer.resetCamera();
 
-        // 1.5 初始 WW/WL 映射
+        // 1.5 初始反相上色 (Inverted Positive Transfer Function: 0=白, 高信号=深黑灰)
         const normWW = Math.max(5.0, (windowWidth / 10000.0) * 255.0);
         const normWL = (windowLevel / 8000.0) * 255.0;
         const lower = Math.max(0, normWL - normWW / 2.0);
         const upper = Math.min(255, normWL + normWW / 2.0);
 
         cfun.removeAllPoints();
-        cfun.addRGBPoint(0, 0, 0, 0);
-        cfun.addRGBPoint(lower, 0.0, 0.0, 0.0);
-        cfun.addRGBPoint(upper, 1.0, 1.0, 1.0);
-        cfun.addRGBPoint(255, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(0, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(lower, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(upper, 0.08, 0.08, 0.10);
+        cfun.addRGBPoint(255, 0.05, 0.05, 0.06);
 
         ofun.removeAllPoints();
         ofun.addPoint(0, 1.0);
@@ -209,10 +210,10 @@ export default function Vtk2DSliceViewer({
         const upper = Math.min(255, normWL + normWW / 2.0);
 
         cfun.removeAllPoints();
-        cfun.addRGBPoint(0, 0, 0, 0);
-        cfun.addRGBPoint(lower, 0.0, 0.0, 0.0);
-        cfun.addRGBPoint(upper, 1.0, 1.0, 1.0);
-        cfun.addRGBPoint(255, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(0, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(lower, 1.0, 1.0, 1.0);
+        cfun.addRGBPoint(upper, 0.08, 0.08, 0.10);
+        cfun.addRGBPoint(255, 0.05, 0.05, 0.06);
 
         ofun.removeAllPoints();
         ofun.addPoint(0, 1.0);
@@ -271,29 +272,29 @@ export default function Vtk2DSliceViewer({
 
     if (!volumeData) {
         return (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: '#64748b', fontSize: 12 }}>
-                <span>⏳ 正在加载 VTK 切片数据...</span>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff', color: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                <span>LOADING VTK SLICE DATA...</span>
             </div>
         );
     }
 
-    const axisColor = axis === 'axial' ? '#22c55e' : (axis === 'coronal' ? '#eab308' : '#ef4444');
+    const axisColor = axis === 'axial' ? '#16a34a' : (axis === 'coronal' ? '#d97706' : '#e11d48');
 
     return (
-        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#0f172a' }}>
+        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#ffffff' }}>
             <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
-            {/* 四周解剖方向指示 */}
-            <div style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', fontSize: 10, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(15,23,42,0.85)', padding: '2px 8px', borderRadius: 3, border: `1px solid ${axisColor}44` }}>
+            {/* 四周解剖方向指示芯片 (Pixel-Perfect Light Chip Style) */}
+            <div style={{ position: 'absolute', top: 7, left: '50%', transform: 'translateX(-50%)', fontFamily: 'var(--font-mono)', fontSize: 9.5, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(6px)', padding: '2px 8px', borderRadius: 4, border: `1px solid ${axisColor}44`, boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
                 {labels.top}
             </div>
-            <div style={{ position: 'absolute', bottom: 6, left: '50%', transform: 'translateX(-50%)', fontSize: 10, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(15,23,42,0.85)', padding: '2px 8px', borderRadius: 3, border: `1px solid ${axisColor}44` }}>
+            <div style={{ position: 'absolute', bottom: 7, left: '50%', transform: 'translateX(-50%)', fontFamily: 'var(--font-mono)', fontSize: 9.5, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(6px)', padding: '2px 8px', borderRadius: 4, border: `1px solid ${axisColor}44`, boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
                 {labels.bottom}
             </div>
-            <div style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(15,23,42,0.85)', padding: '2px 8px', borderRadius: 3, border: `1px solid ${axisColor}44` }}>
+            <div style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', fontFamily: 'var(--font-mono)', fontSize: 9.5, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(6px)', padding: '2px 8px', borderRadius: 4, border: `1px solid ${axisColor}44`, boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
                 {labels.left}
             </div>
-            <div style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(15,23,42,0.85)', padding: '2px 8px', borderRadius: 3, border: `1px solid ${axisColor}44` }}>
+            <div style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', fontFamily: 'var(--font-mono)', fontSize: 9.5, color: axisColor, fontWeight: 700, pointerEvents: 'none', background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(6px)', padding: '2px 8px', borderRadius: 4, border: `1px solid ${axisColor}44`, boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
                 {labels.right}
             </div>
         </div>
